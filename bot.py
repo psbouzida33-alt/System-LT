@@ -8,6 +8,7 @@ import io
 import json
 import math
 import os
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -397,6 +398,7 @@ async def on_ready():
         return
 
     _startup_done = True
+    os.environ.pop("LEVELS_LOGIN_ATTEMPT", None)
 
     await load_database_from_discord()
     _load_backup_state()
@@ -583,6 +585,31 @@ async def _close_with_level_save():
 bot.close = _close_with_level_save
 
 
+def _login_retry_wait(attempt: int) -> int:
+    return min(900, max(90, 60 * attempt))
+
+
+def _handle_login_rate_limit(exc: discord.HTTPException) -> None:
+    attempt = int(os.environ.get("LEVELS_LOGIN_ATTEMPT", "0")) + 1
+    max_attempts = 12
+    if attempt >= max_attempts:
+        raise SystemExit(
+            "Discord login still rate-limited after multiple waits. "
+            "Pause Render auto-deploy, wait 30 min, ensure only ONE service uses "
+            "LEVELS_BOT_TOKEN, then deploy once."
+        ) from exc
+
+    retry_after = float(getattr(exc, "retry_after", 0) or 0)
+    wait = max(_login_retry_wait(attempt), int(retry_after) + 30)
+    print(
+        f"Discord login rate limit (attempt {attempt}/{max_attempts}). "
+        f"Waiting {wait}s before retry — do not spam redeploy."
+    )
+    time.sleep(wait)
+    os.environ["LEVELS_LOGIN_ATTEMPT"] = str(attempt)
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
 if __name__ == "__main__":
     if os.environ.get("DISCORD_TOKEN") and os.environ.get("LEVELS_BOT_TOKEN"):
         print(
@@ -602,10 +629,12 @@ if __name__ == "__main__":
             "Invalid LEVELS_BOT_TOKEN — reset the token in Discord Developer Portal "
             "and update Render Environment."
         ) from exc
+    except RuntimeError as exc:
+        if "Session is closed" in str(exc):
+            print("Discord session closed during login — restarting with a fresh process.")
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+        raise
     except discord.HTTPException as exc:
         if exc.status == 429:
-            raise SystemExit(
-                "Discord rate limit on login. Wait 5–15 min, ensure only ONE instance "
-                "uses this token, then redeploy."
-            ) from exc
+            _handle_login_rate_limit(exc)
         raise
