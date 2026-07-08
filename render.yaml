@@ -8,3 +8,5 @@ services:
     envVars:
       - key: LEVELS_BOT_TOKEN
         sync: false
+      - key: LEVELS_BACKUP_CHANNEL_ID
+        sync: false
