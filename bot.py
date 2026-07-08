@@ -1,7 +1,7 @@
 """
 Legends Tunisia — Levels Bot
 Handles voice XP, level-up cards, level roles, and Discord backup.
-Run with LEVELS_BOT_TOKEN (or DISCORD_TOKEN) — separate from the main bot.
+Run with LEVELS_BOT_TOKEN — separate from the main bot.
 """
 import asyncio
 import io
@@ -42,9 +42,9 @@ from config import (
 
 load_dotenv()
 
-TOKEN = os.getenv("LEVELS_BOT_TOKEN") or os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("LEVELS_BOT_TOKEN")
 if not TOKEN:
-    raise SystemExit("Missing LEVELS_BOT_TOKEN (or DISCORD_TOKEN). Create a second bot app on Discord.")
+    raise SystemExit("Missing LEVELS_BOT_TOKEN. Create a second bot app on Discord.")
 
 user_levels: dict[int, dict] = {}
 _discord_backup_message_id: int | None = None
@@ -611,12 +611,6 @@ def _handle_login_rate_limit(exc: discord.HTTPException) -> None:
 
 
 if __name__ == "__main__":
-    if os.environ.get("DISCORD_TOKEN") and os.environ.get("LEVELS_BOT_TOKEN"):
-        print(
-            "WARNING: both DISCORD_TOKEN and LEVELS_BOT_TOKEN are set. "
-            "Use LEVELS_BOT_TOKEN only on this service."
-        )
-
     print(f"Starting Levels bot (PID {os.getpid()}, build {LEVELS_BOT_BUILD_ID})")
 
     if os.environ.get("PORT"):
