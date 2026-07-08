@@ -12,7 +12,7 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY bot.py config.py level_up_card.py .env.example ./
+COPY bot.py config.py level_up_card.py voice_rooms.py .env.example ./
 RUN mkdir -p data
 
 ENV PYTHONUNBUFFERED=1

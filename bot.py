@@ -1,6 +1,6 @@
 """
-Legends Tunisia — Levels Bot
-Handles voice XP, level-up cards, level roles, and Discord backup.
+Legends Tunisia — System LT Bot
+Voice levels, join-to-create rooms, level-up cards, roles, and backup.
 Run with LEVELS_BOT_TOKEN — separate from the main bot.
 """
 import asyncio
@@ -19,6 +19,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from level_up_card import build_level_up_card
+from voice_rooms import setup_voice_rooms, startup_voice_rooms
 from config import (
     BACKUP_STATE_FILE,
     BOT_VOICE_CHANNEL_ID,
@@ -62,7 +63,7 @@ bot = commands.Bot(
     command_prefix="!",
     intents=intents,
     status=discord.Status.online,
-    activity=discord.Activity(type=discord.ActivityType.watching, name="voice levels"),
+    activity=discord.Activity(type=discord.ActivityType.watching, name="voice levels & rooms"),
 )
 
 
@@ -131,6 +132,13 @@ def _format_level_stats(user_data: dict) -> str:
         f"• **Voice Time:** `{minutes} min`\n"
         f"• **Next Level:** `{remaining} min` remaining"
     )
+
+
+setup_voice_rooms(
+    bot,
+    get_user_level_data=_get_user_level_data,
+    format_level_stats=_format_level_stats,
+)
 
 
 def _iter_level_voice_channels(guild: discord.Guild):
@@ -423,6 +431,7 @@ async def on_ready():
         print(f"WARNING: voice lounge channel {BOT_VOICE_CHANNEL_ID} not found.")
 
     _start_background_tasks()
+    await startup_voice_rooms(bot)
     print("Levels system online.")
 
 
