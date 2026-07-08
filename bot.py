@@ -583,24 +583,29 @@ async def _close_with_level_save():
 bot.close = _close_with_level_save
 
 
-def _login_retry_wait(attempt: int) -> int:
-    return min(900, max(60, 30 * attempt))
-
-
 if __name__ == "__main__":
+    if os.environ.get("DISCORD_TOKEN") and os.environ.get("LEVELS_BOT_TOKEN"):
+        print(
+            "WARNING: both DISCORD_TOKEN and LEVELS_BOT_TOKEN are set. "
+            "Use LEVELS_BOT_TOKEN only on this service."
+        )
+
+    print(f"Starting Levels bot (PID {os.getpid()}, build {LEVELS_BOT_BUILD_ID})")
+
     if os.environ.get("PORT"):
         threading.Thread(target=_start_health_server, daemon=True).start()
 
-    max_login_attempts = 12
-    for attempt in range(1, max_login_attempts + 1):
-        try:
-            bot.run(TOKEN)
-            break
-        except discord.HTTPException as exc:
-            if exc.status != 429 or attempt >= max_login_attempts:
-                raise
-            wait = _login_retry_wait(attempt)
-            print(f"Discord rate limit on login (attempt {attempt}). Waiting {wait}s...")
-            time.sleep(wait)
-    else:
-        raise SystemExit("Could not log in after repeated Discord rate limits.")
+    try:
+        bot.run(TOKEN, log_handler=None)
+    except discord.LoginFailure as exc:
+        raise SystemExit(
+            "Invalid LEVELS_BOT_TOKEN — reset the token in Discord Developer Portal "
+            "and update Render Environment."
+        ) from exc
+    except discord.HTTPException as exc:
+        if exc.status == 429:
+            raise SystemExit(
+                "Discord rate limit on login. Wait 5–15 min, ensure only ONE instance "
+                "uses this token, then redeploy."
+            ) from exc
+        raise

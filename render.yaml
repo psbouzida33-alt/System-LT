@@ -10,3 +10,5 @@ services:
         sync: false
       - key: LEVELS_BACKUP_CHANNEL_ID
         sync: false
+      - key: WEB_CONCURRENCY
+        value: "1"
