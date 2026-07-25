@@ -46,6 +46,7 @@ bot = commands.Bot(
 )
 
 _last_member_count: int | None = None
+_last_stats_status: str | None = None
 _stats_config = load_stats_config()
 
 
@@ -55,11 +56,11 @@ def _guild_member_count(guild: discord.Guild) -> int:
     return guild.member_count or len(guild.members)
 
 
-def _member_channel_name(count: int) -> str:
+def _stats_channel_name(count: int) -> str:
     return f"• Members: {count}"
 
 
-def _clock_channel_name() -> str:
+def _stats_channel_status() -> str:
     index = int(time.time() // CLOCK_ROTATION_SECONDS) % len(WORLD_CLOCKS)
     emoji, label, tz_name = WORLD_CLOCKS[index]
     now = datetime.now(ZoneInfo(tz_name))
@@ -116,37 +117,74 @@ async def _safe_edit_channel_name(
     return False
 
 
-async def update_member_stats_channel(guild: discord.Guild, *, force: bool = False) -> None:
-    global _last_member_count
+async def update_stats_channel(guild: discord.Guild, *, force_members: bool = False) -> None:
+    """Update one voice channel: name = members, status = world clock."""
+    global _last_member_count, _last_stats_status
 
-    channel_id = _stats_config.get("member_channel_id")
+    channel_id = _stats_config.get("stats_channel_id")
     if not channel_id:
+        return
+
+    channel = guild.get_channel(int(channel_id))
+    if not isinstance(channel, discord.VoiceChannel):
         return
 
     count = _guild_member_count(guild)
-    if not force and count == _last_member_count:
+    name = _stats_channel_name(count)
+    status = _stats_channel_status()
+    update_name = force_members or count != _last_member_count
+    update_status = status != _last_stats_status
+
+    if not update_name and not update_status:
         return
 
-    channel = guild.get_channel(int(channel_id))
-    if await _safe_edit_channel_name(channel, _member_channel_name(count), label="member count"):
-        _last_member_count = count
-
-
-async def update_clock_stats_channel(guild: discord.Guild) -> None:
-    channel_id = _stats_config.get("clock_channel_id")
-    if not channel_id:
-        return
-
-    channel = guild.get_channel(int(channel_id))
-    await _safe_edit_channel_name(channel, _clock_channel_name(), label="clock")
+    try:
+        if update_name:
+            await channel.edit(
+                name=name,
+                status=status,
+                reason="Stats bot — members + clock",
+            )
+            _last_member_count = count
+            _last_stats_status = status
+        else:
+            await channel.edit(status=status, reason="Stats bot — clock")
+            _last_stats_status = status
+    except discord.HTTPException as exc:
+        if exc.status == 429:
+            wait = float(getattr(exc, "retry_after", 5) or 5) + 0.5
+            print(f"stats channel: rate limited, waiting {wait:.1f}s")
+            await asyncio.sleep(wait)
+            try:
+                if update_name:
+                    await channel.edit(name=name, status=status, reason="Stats bot — members + clock")
+                    _last_member_count = count
+                    _last_stats_status = status
+                else:
+                    await channel.edit(status=status, reason="Stats bot — clock")
+                    _last_stats_status = status
+            except discord.HTTPException as retry_exc:
+                print(f"stats channel update failed after retry — {retry_exc}")
+        else:
+            print(f"stats channel update failed — {exc}")
+            combined = f"{name} | {status}"[:100]
+            if await _safe_edit_channel_name(channel, combined, label="stats fallback"):
+                _last_member_count = count
+                _last_stats_status = status
+    except TypeError:
+        combined = f"{name} | {status}"[:100]
+        if await _safe_edit_channel_name(channel, combined, label="stats fallback"):
+            _last_member_count = count
+            _last_stats_status = status
+    except Exception as exc:
+        print(f"stats channel update failed — {exc}")
 
 
 async def refresh_all_stats(*, force_members: bool = False) -> None:
     guild = _get_configured_guild()
     if guild is None:
         return
-    await update_member_stats_channel(guild, force=force_members)
-    await update_clock_stats_channel(guild)
+    await update_stats_channel(guild, force_members=force_members)
 
 
 class DummyVoiceClient(discord.VoiceProtocol):
@@ -242,10 +280,10 @@ async def _join_voice_lounge() -> None:
 @bot.event
 async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
-    if not _stats_config.get("member_channel_id") or not _stats_config.get("clock_channel_id"):
-        print("No stat channels configured yet. Run !setupstats in your server.")
-    if not update_clock_task.is_running():
-        update_clock_task.start()
+    if not _stats_config.get("stats_channel_id"):
+        print("No stat channel configured yet. Run !setupstats in your server.")
+    if not update_stats_task.is_running():
+        update_stats_task.start()
     await _join_voice_lounge()
     await refresh_all_stats(force_members=True)
 
@@ -277,7 +315,7 @@ async def on_voice_state_update(
 async def on_member_join(member: discord.Member):
     if member.guild.id != _stats_config.get("guild_id"):
         return
-    await update_member_stats_channel(member.guild)
+    await update_stats_channel(member.guild)
 
 
 @bot.event
@@ -286,19 +324,19 @@ async def on_member_remove(member: discord.Member):
         return
     global _last_member_count
     _last_member_count = None
-    await update_member_stats_channel(member.guild, force=True)
+    await update_stats_channel(member.guild, force_members=True)
 
 
 @tasks.loop(seconds=CLOCK_UPDATE_SECONDS)
-async def update_clock_task():
+async def update_stats_task():
     guild = _get_configured_guild()
     if guild is None:
         return
-    await update_clock_stats_channel(guild)
+    await update_stats_channel(guild)
 
 
-@update_clock_task.before_loop
-async def before_clock_task():
+@update_stats_task.before_loop
+async def before_update_stats_task():
     await bot.wait_until_ready()
 
 
@@ -319,12 +357,12 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
 @bot.command(name="setupstats")
 @commands.has_permissions(manage_guild=True)
 async def setup_stats_cmd(ctx: commands.Context):
-    """Create a stats category with member + clock voice channels (locked)."""
+    """Create one stats voice channel: name = members, status = world clock."""
     guild = ctx.guild
     overwrites = _stat_channel_overwrites(guild)
     count = _guild_member_count(guild)
 
-    status = await ctx.send(f"Creating **{STATS_CATEGORY_NAME}** stat channels…")
+    status = await ctx.send(f"Creating **{STATS_CATEGORY_NAME}**…")
 
     try:
         category = await guild.create_category(
@@ -333,17 +371,15 @@ async def setup_stats_cmd(ctx: commands.Context):
             reason="Stats bot setup — stats category",
         )
 
-        member_channel = await guild.create_voice_channel(
-            name=_member_channel_name(count),
+        stats_channel = await guild.create_voice_channel(
+            name=_stats_channel_name(count),
             category=category,
             overwrites=overwrites,
-            reason="Stats bot setup — member counter",
+            reason="Stats bot setup — server stats",
         )
-        clock_channel = await guild.create_voice_channel(
-            name=_clock_channel_name(),
-            category=category,
-            overwrites=overwrites,
-            reason="Stats bot setup — live clock",
+        await stats_channel.edit(
+            status=_stats_channel_status(),
+            reason="Stats bot setup — clock status",
         )
 
         try:
@@ -351,24 +387,24 @@ async def setup_stats_cmd(ctx: commands.Context):
         except discord.HTTPException:
             pass
 
-        global _stats_config, _last_member_count
+        global _stats_config, _last_member_count, _last_stats_status
         _stats_config = {
             "guild_id": guild.id,
             "category_id": category.id,
-            "member_channel_id": member_channel.id,
-            "clock_channel_id": clock_channel.id,
+            "stats_channel_id": stats_channel.id,
         }
         save_stats_config(_stats_config)
         _last_member_count = count
+        _last_stats_status = _stats_channel_status()
 
         embed = discord.Embed(
             title=f"{STATS_CATEGORY_NAME} — ready",
             description=(
                 f"Category: **{category.name}**\n"
-                f"Member counter: {member_channel.mention}\n"
-                f"Live clock: {clock_channel.mention}\n\n"
-                "Both channels are locked — display only.\n"
-                "The bot will update them automatically."
+                f"Stats channel: {stats_channel.mention}\n"
+                f"• **Name:** member count\n"
+                f"• **Status:** rotating world clock\n\n"
+                "Channel is locked — display only."
             ),
             color=discord.Color.green(),
         )
@@ -384,9 +420,9 @@ async def setup_stats_cmd(ctx: commands.Context):
 @bot.command(name="refreshstats")
 @commands.has_permissions(manage_guild=True)
 async def refresh_stats_cmd(ctx: commands.Context):
-    """Force-refresh member count and clock channels."""
+    """Force-refresh the stats channel."""
     await refresh_all_stats(force_members=True)
-    await ctx.send("Stats channels refreshed.", delete_after=8)
+    await ctx.send("Stats channel refreshed.", delete_after=8)
 
 
 @bot.command(name="ping")

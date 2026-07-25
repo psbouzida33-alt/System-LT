@@ -1,9 +1,9 @@
 """Legends Tunisia — bot settings (edit this file, not Render env)."""
 import json
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
@@ -43,23 +43,22 @@ def load_stats_config() -> dict:
     empty = {
         "guild_id": None,
         "category_id": None,
-        "member_channel_id": None,
-        "clock_channel_id": None,
+        "stats_channel_id": None,
     }
     if not STATS_CONFIG_FILE.is_file():
         return empty
     try:
         with open(STATS_CONFIG_FILE, encoding="utf-8") as f:
             saved = json.load(f)
+
+        stats_channel_id = saved.get("stats_channel_id")
+        if not stats_channel_id:
+            stats_channel_id = saved.get("member_channel_id") or saved.get("clock_channel_id")
+
         return {
             "guild_id": int(saved["guild_id"]) if saved.get("guild_id") else None,
             "category_id": int(saved["category_id"]) if saved.get("category_id") else None,
-            "member_channel_id": int(saved["member_channel_id"])
-            if saved.get("member_channel_id")
-            else None,
-            "clock_channel_id": int(saved["clock_channel_id"])
-            if saved.get("clock_channel_id")
-            else None,
+            "stats_channel_id": int(stats_channel_id) if stats_channel_id else None,
         }
     except (json.JSONDecodeError, OSError, TypeError, ValueError, KeyError) as exc:
         print(f"Could not read {STATS_CONFIG_FILE}: {exc}")
@@ -70,8 +69,7 @@ def save_stats_config(config: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "guild_id": int(config["guild_id"]),
-        "member_channel_id": int(config["member_channel_id"]),
-        "clock_channel_id": int(config["clock_channel_id"]),
+        "stats_channel_id": int(config["stats_channel_id"]),
     }
     if config.get("category_id"):
         payload["category_id"] = int(config["category_id"])
