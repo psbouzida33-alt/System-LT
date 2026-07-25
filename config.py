@@ -12,6 +12,9 @@ STATS_CONFIG_FILE = DATA_DIR / "stats_config.json"
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
 
+# Static voice lounge — bot stays visible here (no audio).
+BOT_VOICE_CHANNEL_ID = int(os.getenv("BOT_VOICE_CHANNEL_ID", "1518025649225470072"))
+
 STATS_TIMEZONE = os.getenv("STATS_TIMEZONE", "Africa/Casablanca")
 STATS_TIME_LABEL = os.getenv("STATS_TIME_LABEL", "Morocco")
 CLOCK_UPDATE_SECONDS = max(1, int(os.getenv("CLOCK_UPDATE_SECONDS", "1")))
