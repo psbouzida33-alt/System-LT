@@ -35,6 +35,7 @@ intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 intents.voice_states = True
+intents.message_content = True
 
 bot = commands.Bot(
     command_prefix="!",
@@ -297,6 +298,20 @@ async def before_clock_task():
     await bot.wait_until_ready()
 
 
+@bot.event
+async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("You need **Manage Server** permission for this command.")
+        return
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("You are not allowed to run this command.")
+        return
+    print(f"Command error ({getattr(ctx.command, 'name', '?')}): {error}")
+    await ctx.send(f"Command failed: {error}")
+
+
 @bot.command(name="setupstats")
 @commands.has_permissions(manage_guild=True)
 async def setup_stats_cmd(ctx: commands.Context):
@@ -366,13 +381,6 @@ async def refresh_stats_cmd(ctx: commands.Context):
 @bot.command(name="ping")
 async def ping_cmd(ctx: commands.Context):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
-
-
-@setup_stats_cmd.error
-@refresh_stats_cmd.error
-async def admin_cmd_error(ctx: commands.Context, error: commands.CommandError):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("You need **Manage Server** permission for this command.")
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
