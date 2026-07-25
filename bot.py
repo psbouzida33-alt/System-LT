@@ -4,8 +4,9 @@ Updates locked voice channels: member count + Morocco live clock.
 """
 import asyncio
 import os
-import sys
+import threading
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from zoneinfo import ZoneInfo
 
 import discord
@@ -258,7 +259,32 @@ async def admin_cmd_error(ctx: commands.Context, error: commands.CommandError):
         await ctx.send("You need **Manage Server** permission for this command.")
 
 
+class _HealthHandler(BaseHTTPRequestHandler):
+    def _send_ok(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+
+    def do_GET(self):
+        self._send_ok()
+        self.wfile.write(b"Legends Tunisia stats bot is running")
+
+    def do_HEAD(self):
+        self._send_ok()
+
+    def log_message(self, format, *args):
+        pass
+
+
+def _start_health_server() -> None:
+    port = int(os.environ.get("PORT", "8080"))
+    HTTPServer(("0.0.0.0", port), _HealthHandler).serve_forever()
+
+
 if __name__ == "__main__":
+    if os.environ.get("PORT"):
+        threading.Thread(target=_start_health_server, daemon=True).start()
+
     try:
         bot.run(TOKEN, log_handler=None)
     except discord.LoginFailure as exc:
