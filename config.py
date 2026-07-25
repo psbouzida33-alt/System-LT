@@ -1,4 +1,5 @@
-"""Shared Discord IDs used by both Legends bots."""
+"""Server stats channels — member counter + live clock."""
+import json
 import os
 from pathlib import Path
 
@@ -7,57 +8,57 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATA_DIR = Path("data")
+STATS_CONFIG_FILE = DATA_DIR / "stats_config.json"
 
-# Voice hubs excluded from XP tracking
-CREATE_CHANNEL_ID = 1517870390968582155
-SUPPORT_CHANNEL_ID = 1518020513174130769
-VERIFICATION_1_ID = 1517597478378143937
-VERIFICATION_2_ID = 1517666468593143940
-BOT_VOICE_CHANNEL_ID = 1518025649225470072
+TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
 
-LEVEL_LOG_CHANNEL_ID = 1517921554510385242
-# Private admin channel for levels JSON backup only — NOT bot-chat (main bot uses that).
-LEVELS_BACKUP_CHANNEL_ID = int(
-    os.getenv("LEVELS_BACKUP_CHANNEL_ID", "1518023858765168771")
-)
-DATA_BACKUP_CHANNEL_ID = LEVELS_BACKUP_CHANNEL_ID
+STATS_TIMEZONE = os.getenv("STATS_TIMEZONE", "Africa/Casablanca")
+STATS_TIME_LABEL = os.getenv("STATS_TIME_LABEL", "Morocco")
+CLOCK_UPDATE_SECONDS = max(1, int(os.getenv("CLOCK_UPDATE_SECONDS", "1")))
+MEMBER_COUNT_EXCLUDE_BOTS = os.getenv("MEMBER_COUNT_EXCLUDE_BOTS", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
-ROLE_LVL_10 = 1518012453001232526
-ROLE_LVL_20 = 1518012596824047677
-ROLE_LVL_30 = 1518012707553546421
-ROLE_LVL_40 = 1518012815116468284
-ROLE_LVL_50 = 1518012943940325406
-ROLE_LVL_60 = 1518805640594850002
-ROLE_LVL_70 = 1518805913530535987
-ROLE_LVL_80 = 1518806076009746543
-ROLE_LVL_90 = 1518806185896185936
-ROLE_LVL_100 = 1518806344373637271
-ROLE_LVL_200 = 1523427665913319574
 
-LEVEL_ROLE_TIERS = (
-    (10, ROLE_LVL_10),
-    (20, ROLE_LVL_20),
-    (30, ROLE_LVL_30),
-    (40, ROLE_LVL_40),
-    (50, ROLE_LVL_50),
-    (60, ROLE_LVL_60),
-    (70, ROLE_LVL_70),
-    (80, ROLE_LVL_80),
-    (90, ROLE_LVL_90),
-    (100, ROLE_LVL_100),
-    (200, ROLE_LVL_200),
-)
-LEVEL_ROLE_IDS = tuple(role_id for _, role_id in LEVEL_ROLE_TIERS)
+def _env_int(name: str) -> int | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
-LEVEL_MINUTES_BASE = 5
-MAX_VOICE_LEVEL = 1000
 
-DB_FILE = str(DATA_DIR / "levels_database.json")
-LEGACY_DB_FILE = "levels_database.json"
-BACKUP_STATE_FILE = str(DATA_DIR / "backup_state.json")
+def load_stats_config() -> dict:
+    """Merge saved setup file with optional .env overrides."""
+    config: dict = {
+        "guild_id": _env_int("GUILD_ID"),
+        "member_channel_id": _env_int("MEMBER_STATS_CHANNEL_ID"),
+        "clock_channel_id": _env_int("CLOCK_STATS_CHANNEL_ID"),
+    }
 
-DISCORD_BACKUP_INTERVAL_MINUTES = max(5, int(os.getenv("DISCORD_BACKUP_INTERVAL_MINUTES", "30")))
-LEVEL_UP_ANNOUNCE_CAP = max(1, int(os.getenv("LEVEL_UP_ANNOUNCE_CAP", "5")))
+    if STATS_CONFIG_FILE.is_file():
+        try:
+            with open(STATS_CONFIG_FILE, encoding="utf-8") as f:
+                saved = json.load(f)
+            for key in config:
+                if config[key] is None and saved.get(key):
+                    config[key] = int(saved[key])
+        except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+            print(f"Could not read {STATS_CONFIG_FILE}: {exc}")
 
-LEVELS_BOT_BUILD_ID = "2026-07-08-levels-split"
-MAIN_BOT_BUILD_ID = "2026-07-08-main-split"
+    return config
+
+
+def save_stats_config(config: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "guild_id": int(config["guild_id"]),
+        "member_channel_id": int(config["member_channel_id"]),
+        "clock_channel_id": int(config["clock_channel_id"]),
+    }
+    with open(STATS_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
