@@ -1,10 +1,11 @@
 """
 Legends Tunisia — Server Stats Bot
-Updates locked voice channels: member count + Morocco live clock.
+Updates locked voice channels: member count + live clock.
 """
 import asyncio
 import os
 import threading
+import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from zoneinfo import ZoneInfo
@@ -15,13 +16,12 @@ from dotenv import load_dotenv
 
 from config import (
     BOT_VOICE_CHANNEL_ID,
+    CLOCK_ROTATION_SECONDS,
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
     STATS_CATEGORY_NAME,
-    STATS_CLOCK_EMOJI,
-    STATS_TIME_LABEL,
-    STATS_TIMEZONE,
     TOKEN,
+    WORLD_CLOCKS,
     load_stats_config,
     save_stats_config,
 )
@@ -59,8 +59,11 @@ def _member_channel_name(count: int) -> str:
     return f"• Members: {count}"
 
 
-def _clock_channel_name(now: datetime) -> str:
-    return f"{STATS_CLOCK_EMOJI} {STATS_TIME_LABEL}: {now.strftime('%H:%M:%S')}"
+def _clock_channel_name() -> str:
+    index = int(time.time() // CLOCK_ROTATION_SECONDS) % len(WORLD_CLOCKS)
+    emoji, label, tz_name = WORLD_CLOCKS[index]
+    now = datetime.now(ZoneInfo(tz_name))
+    return f"{emoji} {label}: {now.strftime('%H:%M:%S')}"
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict:
@@ -134,9 +137,8 @@ async def update_clock_stats_channel(guild: discord.Guild) -> None:
     if not channel_id:
         return
 
-    now = datetime.now(ZoneInfo(STATS_TIMEZONE))
     channel = guild.get_channel(int(channel_id))
-    await _safe_edit_channel_name(channel, _clock_channel_name(now), label="clock")
+    await _safe_edit_channel_name(channel, _clock_channel_name(), label="clock")
 
 
 async def refresh_all_stats(*, force_members: bool = False) -> None:
@@ -320,8 +322,6 @@ async def setup_stats_cmd(ctx: commands.Context):
     """Create a stats category with member + clock voice channels (locked)."""
     guild = ctx.guild
     overwrites = _stat_channel_overwrites(guild)
-    tz = ZoneInfo(STATS_TIMEZONE)
-    now = datetime.now(tz)
     count = _guild_member_count(guild)
 
     status = await ctx.send(f"Creating **{STATS_CATEGORY_NAME}** stat channels…")
@@ -340,7 +340,7 @@ async def setup_stats_cmd(ctx: commands.Context):
             reason="Stats bot setup — member counter",
         )
         clock_channel = await guild.create_voice_channel(
-            name=_clock_channel_name(now),
+            name=_clock_channel_name(),
             category=category,
             overwrites=overwrites,
             reason="Stats bot setup — live clock",
