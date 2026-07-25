@@ -17,6 +17,8 @@ from config import (
     BOT_VOICE_CHANNEL_ID,
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
+    STATS_CATEGORY_NAME,
+    STATS_CLOCK_EMOJI,
     STATS_TIME_LABEL,
     STATS_TIMEZONE,
     TOKEN,
@@ -54,11 +56,11 @@ def _guild_member_count(guild: discord.Guild) -> int:
 
 
 def _member_channel_name(count: int) -> str:
-    return f"👤 | Membres: {count}"
+    return f"• Members: {count}"
 
 
 def _clock_channel_name(now: datetime) -> str:
-    return f"🇲🇦 {STATS_TIME_LABEL}: {now.strftime('%H:%M:%S')}"
+    return f"{STATS_CLOCK_EMOJI} {STATS_TIME_LABEL}: {now.strftime('%H:%M:%S')}"
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict:
@@ -315,36 +317,44 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
 @bot.command(name="setupstats")
 @commands.has_permissions(manage_guild=True)
 async def setup_stats_cmd(ctx: commands.Context):
-    """Create the two stat voice channels (locked, display-only)."""
+    """Create a stats category with member + clock voice channels (locked)."""
     guild = ctx.guild
     overwrites = _stat_channel_overwrites(guild)
     tz = ZoneInfo(STATS_TIMEZONE)
     now = datetime.now(tz)
     count = _guild_member_count(guild)
 
-    status = await ctx.send("Creating stat channels…")
+    status = await ctx.send(f"Creating **{STATS_CATEGORY_NAME}** stat channels…")
 
     try:
-        clock_channel = await guild.create_voice_channel(
-            name=_clock_channel_name(now),
+        category = await guild.create_category(
+            name=STATS_CATEGORY_NAME,
             overwrites=overwrites,
-            reason="Stats bot setup — live clock",
+            reason="Stats bot setup — stats category",
         )
+
         member_channel = await guild.create_voice_channel(
             name=_member_channel_name(count),
+            category=category,
             overwrites=overwrites,
             reason="Stats bot setup — member counter",
         )
+        clock_channel = await guild.create_voice_channel(
+            name=_clock_channel_name(now),
+            category=category,
+            overwrites=overwrites,
+            reason="Stats bot setup — live clock",
+        )
 
         try:
-            await member_channel.edit(position=0)
-            await clock_channel.edit(position=0)
+            await category.edit(position=0)
         except discord.HTTPException:
             pass
 
         global _stats_config, _last_member_count
         _stats_config = {
             "guild_id": guild.id,
+            "category_id": category.id,
             "member_channel_id": member_channel.id,
             "clock_channel_id": clock_channel.id,
         }
@@ -352,8 +362,9 @@ async def setup_stats_cmd(ctx: commands.Context):
         _last_member_count = count
 
         embed = discord.Embed(
-            title="Stat channels ready",
+            title=f"{STATS_CATEGORY_NAME} — ready",
             description=(
+                f"Category: **{category.name}**\n"
                 f"Member counter: {member_channel.mention}\n"
                 f"Live clock: {clock_channel.mention}\n\n"
                 "Both channels are locked — display only.\n"

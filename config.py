@@ -15,8 +15,10 @@ TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
 # Static voice lounge — bot stays visible here (no audio).
 BOT_VOICE_CHANNEL_ID = int(os.getenv("BOT_VOICE_CHANNEL_ID", "1518025649225470072"))
 
-STATS_TIMEZONE = os.getenv("STATS_TIMEZONE", "Africa/Casablanca")
-STATS_TIME_LABEL = os.getenv("STATS_TIME_LABEL", "Morocco")
+STATS_TIMEZONE = os.getenv("STATS_TIMEZONE", "Africa/Tunis")
+STATS_TIME_LABEL = os.getenv("STATS_TIME_LABEL", "Tunisia")
+STATS_CLOCK_EMOJI = os.getenv("STATS_CLOCK_EMOJI", "🇹🇳")
+STATS_CATEGORY_NAME = os.getenv("STATS_CATEGORY_NAME", "Legends Tunisia")
 CLOCK_UPDATE_SECONDS = max(1, int(os.getenv("CLOCK_UPDATE_SECONDS", "1")))
 MEMBER_COUNT_EXCLUDE_BOTS = os.getenv("MEMBER_COUNT_EXCLUDE_BOTS", "false").lower() in {
     "1",
@@ -39,6 +41,7 @@ def load_stats_config() -> dict:
     """Merge saved setup file with optional .env overrides."""
     config: dict = {
         "guild_id": _env_int("GUILD_ID"),
+        "category_id": _env_int("STATS_CATEGORY_ID"),
         "member_channel_id": _env_int("MEMBER_STATS_CHANNEL_ID"),
         "clock_channel_id": _env_int("CLOCK_STATS_CHANNEL_ID"),
     }
@@ -63,5 +66,7 @@ def save_stats_config(config: dict) -> None:
         "member_channel_id": int(config["member_channel_id"]),
         "clock_channel_id": int(config["clock_channel_id"]),
     }
+    if config.get("category_id"):
+        payload["category_id"] = int(config["category_id"])
     with open(STATS_CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
