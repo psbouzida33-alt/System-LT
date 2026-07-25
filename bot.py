@@ -14,6 +14,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from config import (
+    BOT_VOICE_CHANNEL_ID,
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
     STATS_TIME_LABEL,
@@ -33,6 +34,7 @@ if not TOKEN:
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
+intents.voice_states = True
 
 bot = commands.Bot(
     command_prefix="!",
@@ -142,6 +144,96 @@ async def refresh_all_stats(*, force_members: bool = False) -> None:
     await update_clock_stats_channel(guild)
 
 
+class DummyVoiceClient(discord.VoiceProtocol):
+    """Join voice without audio — keeps the bot visible in the lounge channel."""
+
+    def __init__(self, client, channel):
+        self.client = client
+        self.channel = channel
+        self._connected = False
+
+    async def connect(
+        self,
+        *,
+        timeout: float,
+        reconnect: bool,
+        self_deaf: bool = True,
+        self_mute: bool = True,
+    ) -> None:
+        # discord.py passes self_deaf=False by default — always join deafened + muted.
+        await self.channel.guild.change_voice_state(
+            channel=self.channel,
+            self_deaf=True,
+            self_mute=True,
+        )
+        self._connected = True
+
+    async def disconnect(self, *, force: bool = False) -> None:
+        await self.channel.guild.change_voice_state(channel=None)
+        self._connected = False
+        try:
+            key_id, _ = self.channel._get_voice_client_key()
+            self.client._connection._remove_voice_client(key_id)
+        except Exception:
+            pass
+
+    async def on_voice_state_update(self, data):
+        pass
+
+    async def on_voice_server_update(self, data):
+        pass
+
+    def is_connected(self):
+        return self._connected
+
+    def is_playing(self):
+        return False
+
+    def stop(self):
+        pass
+
+
+def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
+    channel = bot.get_channel(BOT_VOICE_CHANNEL_ID)
+    if isinstance(channel, discord.VoiceChannel):
+        return channel
+    for guild in bot.guilds:
+        found = guild.get_channel(BOT_VOICE_CHANNEL_ID)
+        if isinstance(found, discord.VoiceChannel):
+            return found
+    return None
+
+
+async def _ensure_voice_deafened(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
+    await guild.change_voice_state(channel=channel, self_deaf=True, self_mute=True)
+
+
+async def _join_voice_lounge() -> None:
+    voice_channel = _find_voice_lounge_channel()
+    if voice_channel is None:
+        print(f"WARNING: voice lounge channel {BOT_VOICE_CHANNEL_ID} not found.")
+        return
+
+    member = voice_channel.guild.me
+    if member and member.voice and member.voice.channel:
+        if member.voice.channel.id == BOT_VOICE_CHANNEL_ID:
+            if not member.voice.self_deaf or not member.voice.self_mute:
+                try:
+                    await _ensure_voice_deafened(voice_channel.guild, voice_channel)
+                    print("Re-applied deafen/mute in voice lounge.")
+                except Exception as exc:
+                    print(f"Failed to deafen in voice lounge: {exc}")
+            return
+
+    try:
+        await voice_channel.connect(cls=DummyVoiceClient, self_deaf=True, self_mute=True)
+        print(f"Connected to voice lounge (deafened): {voice_channel.name}")
+    except discord.ClientException:
+        pass
+    except Exception as exc:
+        print(f"Failed to join voice lounge: {exc}")
+
+
 @bot.event
 async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
@@ -149,7 +241,31 @@ async def on_ready():
         print("No stat channels configured yet. Run !setupstats in your server.")
     if not update_clock_task.is_running():
         update_clock_task.start()
+    await _join_voice_lounge()
     await refresh_all_stats(force_members=True)
+
+
+@bot.event
+async def on_voice_state_update(
+    member: discord.Member,
+    before: discord.VoiceState,
+    after: discord.VoiceState,
+):
+    if member.id != bot.user.id:
+        return
+
+    if after.channel and after.channel.id == BOT_VOICE_CHANNEL_ID:
+        if not after.self_deaf or not after.self_mute:
+            await asyncio.sleep(0.5)
+            try:
+                await _ensure_voice_deafened(member.guild, after.channel)
+            except Exception as exc:
+                print(f"Failed to enforce deafen in lounge: {exc}")
+        return
+
+    if before.channel and before.channel.id == BOT_VOICE_CHANNEL_ID:
+        await asyncio.sleep(2)
+        await _join_voice_lounge()
 
 
 @bot.event
