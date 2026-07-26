@@ -30,7 +30,7 @@ WORLD_CLOCKS = (
     ("🇨🇦", "Canada", "America/Toronto"),
 )
 
-CLOCK_ROTATION_SECONDS = 300  # switch country every 5 minutes
+CLOCK_ROTATION_SECONDS = 60  # switch country every 1 minutes
 CLOCK_UPDATE_SECONDS = 1       # refresh displayed time every second
 MEMBER_COUNT_EXCLUDE_BOTS = False
 
