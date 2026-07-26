@@ -22,12 +22,6 @@ WORLD_CLOCKS = (
     ("🇩🇿", "Algeria", "Africa/Algiers"),
     ("🇱🇾", "Tripoli", "Africa/Tripoli"),
     ("🇮🇹", "Italy", "Europe/Rome"),
-    ("🇫🇷", "France", "Europe/Paris"),
-    ("🇪🇸", "Spain", "Europe/Madrid"),
-    ("🇩🇪", "Germany", "Europe/Berlin"),
-    ("🇬🇧", "UK", "Europe/London"),
-    ("🇺🇸", "USA", "America/New_York"),
-    ("🇨🇦", "Canada", "America/Toronto"),
 )
 
 CLOCK_ROTATION_SECONDS = 60  # switch country every 1 minutes
