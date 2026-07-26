@@ -25,7 +25,7 @@ WORLD_CLOCKS = (
 )
 
 CLOCK_ROTATION_SECONDS = 60  # switch country every 1 minutes
-CLOCK_UPDATE_SECONDS = 1       # refresh displayed time every second
+CLOCK_UPDATE_SECONDS = 60       # refresh displayed time every second
 MEMBER_COUNT_EXCLUDE_BOTS = False
 
 DATA_DIR = Path("data")
