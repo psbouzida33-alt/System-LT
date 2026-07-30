@@ -436,6 +436,27 @@ async def refresh_stats_cmd(ctx: commands.Context):
 @bot.command(name="ping")
 async def ping_cmd(ctx: commands.Context):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
+
+@bot.command(name="changename")
+@commands.guild_only()
+async def change_name_cmd(ctx: commands.Context, *, new_nick: str):
+    new_nick = new_nick.strip()
+    if not new_nick:
+        await ctx.send("Please provide a new nickname.", delete_after=10)
+        return
+
+    if len(new_nick) > 32:
+        await ctx.send("Nickname must be 32 characters or less.", delete_after=10)
+        return
+
+    try:
+        await ctx.author.edit(nick=new_nick, reason="Changed via bot command")
+        await ctx.send(f"Your nickname has been changed to **{new_nick}**.", delete_after=10)
+    except discord.Forbidden:
+        await ctx.send("I don't have permission to change your nickname.", delete_after=10)
+    except Exception as exc:
+        await ctx.send(f"Could not change your nickname: {exc}", delete_after=10)
+
 # --- Nickname request UI ---
 class NicknameRequestModal(discord.ui.Modal, title="Change Your Nickname"):
     new_nick = discord.ui.TextInput(
