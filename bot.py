@@ -433,8 +433,8 @@ async def refresh_stats_cmd(ctx: commands.Context):
 async def ping_cmd(ctx: commands.Context):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
 # --- Nickname request UI ---
-class NicknameRequestModal(discord.ui.Modal, title="Nickname request"):
-    new_nick = discord.ui.TextInput(label="Desired nickname", max_length=32)
+class NicknameRequestModal(discord.ui.Modal, title="Change Nickname"):
+    new_nick = discord.ui.TextInput(label="New nickname", max_length=32)
 
     def __init__(self, requester: discord.Member, *, admin_channel: discord.TextChannel | None):
         super().__init__()
@@ -442,6 +442,13 @@ class NicknameRequestModal(discord.ui.Modal, title="Nickname request"):
         self.admin_channel = admin_channel
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This nickname request must be made inside a server.",
+                ephemeral=True,
+            )
+            return
+
         requested = self.new_nick.value.strip()
         if not requested:
             await interaction.response.send_message("Nickname cannot be empty.", ephemeral=True)
@@ -476,6 +483,13 @@ class NicknameRequestView(discord.ui.View):
 
     @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.danger, custom_id="nickrequest:open")
     async def open_modal(self, button: discord.ui.Button, interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This button can only be used inside a server.",
+                ephemeral=True,
+            )
+            return
+
         print(f"[nickname] open_modal pressed by {interaction.user} ({interaction.user.id})")
         admin_channel = self.admin_channel
         if admin_channel is None and interaction.guild:
