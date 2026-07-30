@@ -24,6 +24,8 @@ from config import (
     WORLD_CLOCKS,
     load_stats_config,
     save_stats_config,
+    load_nick_config,
+    save_nick_config,
 )
 
 load_dotenv()
@@ -48,6 +50,7 @@ bot = commands.Bot(
 _last_member_count: int | None = None
 _last_stats_status: str | None = None
 _stats_config = load_stats_config()
+_nick_config = load_nick_config()
 
 
 def _guild_member_count(guild: discord.Guild) -> int:
@@ -532,16 +535,56 @@ async def setup_nick_cmd(ctx: commands.Context, admin_channel: discord.TextChann
 
     Usage: `!setupnick` to post in current channel, or `!setupnick #requests` to configure an admin channel.
     """
+    # If no admin_channel passed, check persisted config for this guild
+    if admin_channel is None:
+        saved_id = _nick_config.get("review_channel_id")
+        if saved_id and ctx.guild:
+            admin_channel = ctx.guild.get_channel(int(saved_id))
+
     view = NicknameRequestView(admin_channel=admin_channel)
     embed = discord.Embed(
         title="Nickname Request",
         description=(
-            "Use the button below to request a nickname change. "
-            "Staff can approve or reject requests from the review channel."
+            "Use the button below to request a nickname change.\n\n"
+            "Please make sure your nickname follows the server rules:\n"
+            "• Must be appropriate and respectful\n"
+            "• No offensive, abusive, or explicit language\n"
+            "• No impersonation of members or staff\n"
+            "• Keep it readable and avoid excessive symbols\n"
+            "• Follow all community rules\n\n"
+            "Requests that break the rules will be rejected."
         ),
         color=discord.Color.blurple(),
     )
     await ctx.send(embed=embed, view=view)
+
+
+@bot.command(name="setnickreview")
+@commands.has_permissions(manage_guild=True)
+async def set_nick_review_cmd(ctx: commands.Context, channel: discord.TextChannel):
+    """Set the persistent review channel for nickname requests."""
+    global _nick_config
+    if ctx.guild is None:
+        await ctx.send("This command must be run in a guild.")
+        return
+    _nick_config = {"review_channel_id": channel.id, "guild_id": ctx.guild.id}
+    save_nick_config(_nick_config)
+    await ctx.send(f"Nickname review channel saved: {channel.mention}")
+
+
+@bot.command(name="getnickreview")
+@commands.has_permissions(manage_guild=True)
+async def get_nick_review_cmd(ctx: commands.Context):
+    """Show the configured review channel for the server."""
+    saved_id = _nick_config.get("review_channel_id")
+    if not saved_id:
+        await ctx.send("No nickname review channel configured.")
+        return
+    channel = ctx.guild.get_channel(int(saved_id)) if ctx.guild else None
+    if channel:
+        await ctx.send(f"Configured review channel: {channel.mention}")
+    else:
+        await ctx.send("Configured review channel is not available in this server.")
 class _HealthHandler(BaseHTTPRequestHandler):
     def _send_ok(self):
         self.send_response(200)

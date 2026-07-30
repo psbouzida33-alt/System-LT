@@ -69,3 +69,34 @@ def save_stats_config(config: dict) -> None:
         payload["category_id"] = int(config["category_id"])
     with open(STATS_CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
+
+
+# --- Nickname review channel persistence ---
+NICK_CONFIG_FILE = DATA_DIR / "nick_config.json"
+
+
+def load_nick_config() -> dict:
+    empty = {"review_channel_id": None, "guild_id": None}
+    if not NICK_CONFIG_FILE.is_file():
+        return empty
+    try:
+        with open(NICK_CONFIG_FILE, encoding="utf-8") as f:
+            saved = json.load(f)
+        return {
+            "review_channel_id": int(saved["review_channel_id"]) if saved.get("review_channel_id") else None,
+            "guild_id": int(saved["guild_id"]) if saved.get("guild_id") else None,
+        }
+    except (json.JSONDecodeError, OSError, TypeError, ValueError, KeyError) as exc:
+        print(f"Could not read {NICK_CONFIG_FILE}: {exc}")
+        return empty
+
+
+def save_nick_config(config: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {}
+    if config.get("review_channel_id"):
+        payload["review_channel_id"] = int(config["review_channel_id"])
+    if config.get("guild_id"):
+        payload["guild_id"] = int(config["guild_id"])
+    with open(NICK_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
