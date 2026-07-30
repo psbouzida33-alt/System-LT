@@ -458,11 +458,7 @@ class NicknameRequestModal(discord.ui.Modal, title="Change Room Name"):
             await interaction.response.send_message("Nickname cannot be empty.", ephemeral=True)
             return
 
-        # Acknowledge to requester
-        await interaction.response.send_message(
-            "Your nickname request has been sent to the staff.",
-            ephemeral=True,
-        )
+        await interaction.response.defer(ephemeral=True)
 
         embed = discord.Embed(
             title="Nickname change request",
@@ -471,13 +467,27 @@ class NicknameRequestModal(discord.ui.Modal, title="Change Room Name"):
             timestamp=datetime.utcnow(),
         )
 
-        # Send to admin review channel if configured, otherwise send to the channel where user clicked
         target = self.admin_channel or interaction.channel
         if target is None:
+            await interaction.followup.send(
+                "Unable to process your request because the channel is unavailable.",
+                ephemeral=True,
+            )
             return
 
         view = AdminApproveView(requester_id=self.requester.id, requested_nick=requested)
-        await target.send(embed=embed, view=view)
+        try:
+            await target.send(embed=embed, view=view)
+            await interaction.followup.send(
+                "Your nickname request has been sent to the staff.",
+                ephemeral=True,
+            )
+        except Exception as exc:
+            print(f"[nickname] failed to send request embed: {exc}")
+            await interaction.followup.send(
+                "Could not send your nickname request right now. Please try again later.",
+                ephemeral=True,
+            )
 
 
 class NicknameRequestView(discord.ui.View):
