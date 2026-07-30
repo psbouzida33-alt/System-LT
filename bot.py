@@ -511,6 +511,20 @@ class NicknameRequestView(discord.ui.View):
             if saved_id:
                 admin_channel = interaction.guild.get_channel(int(saved_id))
 
+        # Opt-in debug quick-response: set DEBUG_NICK_QUICK_RESP=1 in the environment
+        # (Render env vars) to make the button reply immediately with an ephemeral
+        # confirmation. This helps determine whether interactions reach the deployed
+        # instance (useful for diagnosing cold-start / timeout issues).
+        if os.environ.get("DEBUG_NICK_QUICK_RESP") == "1":
+            try:
+                await interaction.response.send_message(
+                    "Debug: button press received by bot.",
+                    ephemeral=True,
+                )
+                return
+            except Exception as exc:
+                print(f"[nickname] debug quick response failed: {exc}")
+
         modal = NicknameRequestModal(requester=interaction.user, admin_channel=admin_channel)
         try:
             await interaction.response.send_modal(modal)
