@@ -475,6 +475,7 @@ class NicknameRequestView(discord.ui.View):
 
     @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.danger, custom_id="nickrequest:open")
     async def open_modal(self, button: discord.ui.Button, interaction: discord.Interaction):
+        print(f"[nickname] open_modal pressed by {interaction.user} ({interaction.user.id})")
         admin_channel = self.admin_channel
         if admin_channel is None and interaction.guild:
             saved_id = _nick_config.get("review_channel_id")
@@ -482,7 +483,17 @@ class NicknameRequestView(discord.ui.View):
                 admin_channel = interaction.guild.get_channel(int(saved_id))
 
         modal = NicknameRequestModal(requester=interaction.user, admin_channel=admin_channel)
-        await interaction.response.send_modal(modal)
+        try:
+            await interaction.response.send_modal(modal)
+        except Exception as exc:
+            print(f"[nickname] failed to open modal: {exc}")
+            try:
+                await interaction.response.send_message(
+                    "Unable to open nickname request modal right now. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
 
 
 # Register persistent view handlers so button interactions continue working after restarts
