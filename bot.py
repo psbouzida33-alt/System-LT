@@ -46,7 +46,6 @@ intents.message_content = True
 class StatsBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.add_view(NicknameRequestView())
-        self.add_view(PunishmentRequestView())
 
 
 bot = StatsBot(
@@ -118,6 +117,26 @@ def _get_timeout_until(duration: str) -> datetime | None:
     if parsed is None:
         return None
     return datetime.now(timezone.utc) + parsed
+
+
+def _resolve_member(guild: discord.Guild, value: str) -> discord.Member | None:
+    value = value.strip()
+    if not value:
+        return None
+
+    if value.startswith("<@") and value.endswith(">"):
+        value = re.sub(r"[<@!>]+", "", value)
+
+    if value.isdigit():
+        member = guild.get_member(int(value))
+        if member:
+            return member
+
+    lowered = value.lower()
+    for member in guild.members:
+        if member.name.lower() == lowered or member.display_name.lower() == lowered:
+            return member
+    return None
 
 
 async def _safe_edit_channel_name(
