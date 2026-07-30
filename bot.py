@@ -4,9 +4,10 @@ Updates locked voice channels: member count + live clock.
 """
 import asyncio
 import os
+import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -45,6 +46,7 @@ intents.message_content = True
 class StatsBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.add_view(NicknameRequestView())
+        self.add_view(PunishmentRequestView())
 
 
 bot = StatsBot(
@@ -91,6 +93,31 @@ def _get_configured_guild() -> discord.Guild | None:
     if not guild_id:
         return bot.guilds[0] if len(bot.guilds) == 1 else None
     return bot.get_guild(int(guild_id))
+
+
+def _parse_duration(duration: str) -> timedelta | None:
+    duration = duration.strip().lower()
+    if not duration:
+        return None
+    match = re.fullmatch(r"(\d+)\s*([smhd])", duration)
+    if not match:
+        return None
+    value = int(match.group(1))
+    unit = match.group(2)
+    seconds = {
+        "s": 1,
+        "m": 60,
+        "h": 3600,
+        "d": 86400,
+    }[unit]
+    return timedelta(seconds=value * seconds)
+
+
+def _get_timeout_until(duration: str) -> datetime | None:
+    parsed = _parse_duration(duration)
+    if parsed is None:
+        return None
+    return datetime.now(timezone.utc) + parsed
 
 
 async def _safe_edit_channel_name(
@@ -610,25 +637,184 @@ class NicknameRequestView(discord.ui.View):
 
 
 # Register persistent view handlers so button interactions continue working after restarts
-bot.add_view(NicknameRequestView())
+
+
+class PunishmentModal(discord.ui.Modal, title="Punishment Details"):
+    duration: discord.ui.TextInput["PunishmentModal"] = discord.ui.TextInput(
+        label="Duration",
+        placeholder="30m, 1h, 1d — required for timeout/chatmute/voicemute, leave blank for ban/warn",
+        required=False,
+        max_length=20,
+    )
+    reason: discord.ui.TextInput["PunishmentModal"] = discord.ui.TextInput(
+        label="Reason",
+        style=discord.TextStyle.long,
+        placeholder="Explain why this action is being taken.",
+        required=True,
+        max_length=200,
+    )
+
+    def __init__(self, action: str, target: discord.Member, moderator: discord.Member):
+        super().__init__()
+        self.action = action
+        self.target = target
+        self.moderator = moderator
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This command must be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        reason = self.reason.value.strip()
+        if not reason:
+            await interaction.response.send_message(
+                "A reason is required.",
+                ephemeral=True,
+            )
+            return
+
+        duration = self.duration.value.strip()
+        if self.action in {"timeout", "chatmute", "voicemute"}:
+            if not duration:
+                await interaction.response.send_message(
+                    "Duration is required for this action.",
+                    ephemeral=True,
+                )
+                return
+            until = _get_timeout_until(duration)
+            if until is None:
+                await interaction.response.send_message(
+                    "Invalid duration format. Use e.g. 30m, 1h, 1d.",
+                    ephemeral=True,
+                )
+                return
+        else:
+            until = None
+
+        await interaction.response.defer(thinking=True, ephemeral=True)
+
+        try:
+            if self.action == "ban":
+                await self.target.ban(reason=reason, delete_message_days=0)
+                response = f"{self.target.mention} has been banned."
+            elif self.action == "warn":
+                dm_text = (
+                    f"You have been warned in {interaction.guild.name}.\n"
+                    f"Reason: {reason}"
+                )
+                try:
+                    await self.target.send(dm_text)
+                except Exception:
+                    pass
+                response = f"{self.target.mention} has been warned."
+            elif self.action == "timeout":
+                assert until is not None
+                await self.target.edit(timed_out_until=until, reason=reason)
+                response = f"{self.target.mention} has been timed out until {until.isoformat()} UTC."
+            elif self.action == "chatmute":
+                assert until is not None
+                await self.target.edit(timed_out_until=until, reason=f"Chat mute — {reason}")
+                response = f"{self.target.mention} has been chat-muted until {until.isoformat()} UTC."
+            elif self.action == "voicemute":
+                assert until is not None
+                if self.target.voice and self.target.voice.channel:
+                    await self.target.edit(mute=True, reason=f"Voice mute — {reason}")
+                else:
+                    await self.target.edit(timed_out_until=until, reason=f"Voice mute — {reason}")
+                response = f"{self.target.mention} has been voice-muted until {until.isoformat()} UTC."
+            else:
+                response = "Unknown punishment action."
+
+            await interaction.followup.send(response, ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "I don't have permission to perform that action.",
+                ephemeral=True,
+            )
+        except Exception as exc:
+            await interaction.followup.send(
+                f"Failed to apply punishment: {exc}",
+                ephemeral=True,
+            )
 
 
 class PunishmentRequestView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        self.target_member: discord.Member | None = None
 
-    @discord.ui.button(label="Punishment Commands", style=discord.ButtonStyle.danger, custom_id="punishment:open")
-    async def open_panel(self, interaction: discord.Interaction, button: Any) -> None:
+    @discord.ui.user_select(
+        placeholder="Select member to punish...",
+        min_values=1,
+        max_values=1,
+        custom_id="punishment:select_member",
+    )
+    async def select_member(self, interaction: discord.Interaction, select: discord.ui.UserSelect) -> None:
+        selected = select.values[0]
+        if not isinstance(selected, discord.Member):
+            await interaction.response.send_message(
+                "Please select a server member.",
+                ephemeral=True,
+            )
+            return
+
+        self.target_member = selected
         await interaction.response.send_message(
-            "Moderation commands:\n"
-            "• `?ban @user reason`\n"
-            "• `?timeout @user 1h reason`\n"
-            "• `?chatmute @user 30m reason`\n"
-            "• `?voicemute @user 1h reason`\n"
-            "• `?warn @user reason`\n\n"
-            "Use these commands responsibly and only for valid rule violations.",
+            f"Selected {selected.mention} for punishment.",
             ephemeral=True,
         )
+
+    async def _open_punishment_modal(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+    ) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This button can only be used inside a server.",
+                ephemeral=True,
+            )
+            return
+
+        target = self.target_member
+        if target is None:
+            await interaction.response.send_message(
+                "Select a member first using the dropdown.",
+                ephemeral=True,
+            )
+            return
+
+        modal = PunishmentModal(action=action, target=target, moderator=interaction.user)
+        try:
+            await interaction.response.send_modal(modal)
+        except Exception as exc:
+            await interaction.response.send_message(
+                f"Unable to open punishment modal: {exc}",
+                ephemeral=True,
+            )
+
+    @discord.ui.button(label="Ban", style=discord.ButtonStyle.danger, custom_id="punishment:ban")
+    async def ban(self, interaction: discord.Interaction, button: Any) -> None:
+        await self._open_punishment_modal(interaction, "ban")
+
+    @discord.ui.button(label="Timeout", style=discord.ButtonStyle.danger, custom_id="punishment:timeout")
+    async def timeout(self, interaction: discord.Interaction, button: Any) -> None:
+        await self._open_punishment_modal(interaction, "timeout")
+
+    @discord.ui.button(label="Chat Mute", style=discord.ButtonStyle.secondary, custom_id="punishment:chatmute")
+    async def chatmute(self, interaction: discord.Interaction, button: Any) -> None:
+        await self._open_punishment_modal(interaction, "chatmute")
+
+    @discord.ui.button(label="Voice Mute", style=discord.ButtonStyle.secondary, custom_id="punishment:voicemute")
+    async def voicemute(self, interaction: discord.Interaction, button: Any) -> None:
+        await self._open_punishment_modal(interaction, "voicemute")
+
+    @discord.ui.button(label="Warn", style=discord.ButtonStyle.primary, custom_id="punishment:warn")
+    async def warn(self, interaction: discord.Interaction, button: Any) -> None:
+        await self._open_punishment_modal(interaction, "warn")
 
 
 class AdminApproveView(discord.ui.View):
