@@ -433,10 +433,10 @@ async def refresh_stats_cmd(ctx: commands.Context):
 async def ping_cmd(ctx: commands.Context):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
 # --- Nickname request UI ---
-class NicknameRequestModal(discord.ui.Modal, title="Change Room Name"):
+class NicknameRequestModal(discord.ui.Modal, title="Change Nickname"):
     new_nick = discord.ui.TextInput(
-        label="New Room Name",
-        placeholder="Enter channel name...",
+        label="New Nickname",
+        placeholder="Enter nickname...",
         max_length=32,
     )
 
