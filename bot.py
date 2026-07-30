@@ -803,7 +803,7 @@ class PunishmentRequestView(discord.ui.View):
         await self._open_punishment_modal(interaction, "ban")
 
     @discord.ui.button(label="Timeout", style=discord.ButtonStyle.danger, custom_id="punishment:timeout")
-    async def timeout(self, interaction: discord.Interaction, button: Any) -> None:
+    async def timeout_button(self, interaction: discord.Interaction, button: Any) -> None:
         await self._open_punishment_modal(interaction, "timeout")
 
     @discord.ui.button(label="Chat Mute", style=discord.ButtonStyle.secondary, custom_id="punishment:chatmute")
