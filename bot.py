@@ -428,8 +428,120 @@ async def refresh_stats_cmd(ctx: commands.Context):
 @bot.command(name="ping")
 async def ping_cmd(ctx: commands.Context):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
+# --- Nickname request UI ---
+class NicknameRequestModal(discord.ui.Modal, title="Nickname request"):
+    new_nick = discord.ui.TextInput(label="Desired nickname", max_length=32)
+
+    def __init__(self, requester: discord.Member, *, admin_channel: discord.TextChannel | None):
+        super().__init__()
+        self.requester = requester
+        self.admin_channel = admin_channel
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        requested = self.new_nick.value.strip()
+        if not requested:
+            await interaction.response.send_message("Nickname cannot be empty.", ephemeral=True)
+            return
+
+        # Acknowledge to requester
+        await interaction.response.send_message(
+            "Your nickname request has been sent to the staff.",
+            ephemeral=True,
+        )
+
+        embed = discord.Embed(
+            title="Nickname change request",
+            description=f"User: {self.requester.mention}\nRequested nickname: **{requested}**",
+            color=discord.Color.blue(),
+            timestamp=datetime.utcnow(),
+        )
+
+        # Send to admin review channel if configured, otherwise send to the channel where user clicked
+        target = self.admin_channel or interaction.channel
+        if target is None:
+            return
+
+        view = AdminApproveView(requester_id=self.requester.id, requested_nick=requested)
+        await target.send(embed=embed, view=view)
 
 
+class NicknameRequestView(discord.ui.View):
+    def __init__(self, *, admin_channel: discord.TextChannel | None = None):
+        super().__init__(timeout=None)
+        self.admin_channel = admin_channel
+
+    @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.primary, custom_id="nickrequest:open")
+    async def open_modal(self, button: discord.ui.Button, interaction: discord.Interaction):
+        modal = NicknameRequestModal(requester=interaction.user, admin_channel=self.admin_channel)
+        await interaction.response.send_modal(modal)
+
+
+class AdminApproveView(discord.ui.View):
+    def __init__(self, requester_id: int, requested_nick: str):
+        super().__init__(timeout=None)
+        self.requester_id = requester_id
+        self.requested_nick = requested_nick
+
+    async def _is_authorized(self, member: discord.Member) -> bool:
+        return member.guild_permissions.manage_nicknames or member.guild_permissions.manage_roles or member.guild_permissions.manage_guild
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, custom_id="nickrequest:approve")
+    async def approve(self, button: discord.ui.Button, interaction: discord.Interaction):
+        if not await self._is_authorized(interaction.user):
+            await interaction.response.send_message("You are not allowed to approve nickname requests.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Could not resolve guild.", ephemeral=True)
+            return
+
+        member = guild.get_member(self.requester_id)
+        if member is None:
+            await interaction.response.send_message("Member not found.", ephemeral=True)
+            return
+
+        try:
+            await member.edit(nick=self.requested_nick, reason=f"Approved by {interaction.user}")
+            await interaction.response.send_message(f"Nickname for {member.mention} changed to **{self.requested_nick}**.")
+            # disable buttons after action
+            for child in self.children:
+                child.disabled = True
+            await interaction.message.edit(view=self)
+        except discord.Forbidden:
+            await interaction.response.send_message("I don't have permission to change that member's nickname.", ephemeral=True)
+        except Exception as exc:
+            await interaction.response.send_message(f"Failed to change nickname: {exc}", ephemeral=True)
+
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="nickrequest:reject")
+    async def reject(self, button: discord.ui.Button, interaction: discord.Interaction):
+        if not await self._is_authorized(interaction.user):
+            await interaction.response.send_message("You are not allowed to reject nickname requests.", ephemeral=True)
+            return
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.message.edit(view=self)
+        await interaction.response.send_message("Request rejected.")
+
+
+@bot.command(name="setupnick")
+@commands.has_permissions(manage_guild=True)
+async def setup_nick_cmd(ctx: commands.Context, admin_channel: discord.TextChannel | None = None):
+    """Post a nickname-request panel in this channel or a specified admin review channel.
+
+    Usage: `!setupnick` to post in current channel, or `!setupnick #requests` to configure an admin channel.
+    """
+    view = NicknameRequestView(admin_channel=admin_channel)
+    embed = discord.Embed(
+        title="Nickname Request",
+        description=(
+            "Use the button below to request a nickname change. "
+            "Staff can approve or reject requests from the review channel."
+        ),
+        color=discord.Color.blurple(),
+    )
+    await ctx.send(embed=embed, view=view)
 class _HealthHandler(BaseHTTPRequestHandler):
     def _send_ok(self):
         self.send_response(200)
