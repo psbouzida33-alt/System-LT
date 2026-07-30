@@ -336,6 +336,7 @@ async def on_ready():
     if _dnd_enabled:
         await _update_presence(discord.Status.dnd)
         print("Do-Not-Disturb mode restored on startup.")
+        print("Bot is online and in DND mode!")
     if not _stats_config.get("stats_channel_id"):
         print("No stat channel configured yet. Run ?setupstats in your server.")
     if not update_stats_task.is_running():
