@@ -611,7 +611,6 @@ class NicknameRequestView(discord.ui.View):
 
 # Register persistent view handlers so button interactions continue working after restarts
 bot.add_view(NicknameRequestView())
-bot.add_view(PunishmentRequestView())
 
 
 class PunishmentRequestView(discord.ui.View):
