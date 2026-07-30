@@ -28,6 +28,8 @@ from config import (
     save_stats_config,
     load_nick_config,
     save_nick_config,
+    load_dnd_mode,
+    save_dnd_mode,
 )
 
 load_dotenv()
@@ -58,6 +60,7 @@ _last_member_count: int | None = None
 _last_stats_status: str | None = None
 _stats_config: dict[str, int | None] = load_stats_config()
 _nick_config: dict[str, int | None] = load_nick_config()
+_dnd_enabled: bool = load_dnd_mode()
 
 
 def _guild_member_count(guild: discord.Guild) -> int:
@@ -812,6 +815,34 @@ async def setup_nick_cmd(ctx: commands.Context[StatsBot], admin_channel: discord
         color=discord.Color.blurple(),
     )
     await ctx.send(embed=embed, view=view)
+
+
+@bot.command(name="dnd")
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def dnd_cmd(ctx: commands.Context[StatsBot], action: str | None = None):
+    """Manage Do-Not-Disturb mode for the bot.
+
+    Usage: `?dnd on` — enable, `?dnd off` — disable, `?dnd status` — show current state.
+    """
+    global _dnd_enabled
+    if action is None or action.lower() == "status":
+        await ctx.send(f"Do-Not-Disturb mode is {'ENABLED' if _dnd_enabled else 'disabled'}.")
+        return
+
+    if action.lower() in {"on", "enable", "true", "1"}:
+        _dnd_enabled = True
+        save_dnd_mode(True)
+        await ctx.send("Do-Not-Disturb mode enabled. The bot will reduce notifications.")
+        return
+
+    if action.lower() in {"off", "disable", "false", "0"}:
+        _dnd_enabled = False
+        save_dnd_mode(False)
+        await ctx.send("Do-Not-Disturb mode disabled. The bot will resume normal notifications.")
+        return
+
+    await ctx.send("Unknown action. Use `on`, `off`, or `status`.")
 
 
 @bot.command(name="setnickreview")

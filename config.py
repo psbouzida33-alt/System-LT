@@ -80,6 +80,29 @@ def save_stats_config(config: dict[str, int | None]) -> None:
 # --- Nickname review channel persistence ---
 NICK_CONFIG_FILE = DATA_DIR / "nick_config.json"
 
+# --- Do-Not-Disturb (DND) mode persistence ---
+DND_CONFIG_FILE = DATA_DIR / "dnd_config.json"
+
+
+def load_dnd_mode() -> bool:
+    """Return True if DND mode is enabled for the bot (persisted in data/dnd_config.json)."""
+    if not DND_CONFIG_FILE.is_file():
+        return False
+    try:
+        with open(DND_CONFIG_FILE, encoding="utf-8") as f:
+            saved = json.load(f)
+        return bool(saved.get("dnd_enabled", False))
+    except (json.JSONDecodeError, OSError, TypeError, ValueError, KeyError) as exc:
+        print(f"Could not read {DND_CONFIG_FILE}: {exc}")
+        return False
+
+
+def save_dnd_mode(enabled: bool) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {"dnd_enabled": bool(enabled)}
+    with open(DND_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
 
 def load_nick_config() -> dict[str, int | None]:
     empty: dict[str, int | None] = {"review_channel_id": None, "guild_id": None}
