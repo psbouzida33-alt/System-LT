@@ -547,6 +547,7 @@ class AdminApproveView(discord.ui.View):
 
 
 @bot.command(name="setupnick")
+@commands.guild_only()
 @commands.has_permissions(manage_guild=True)
 async def setup_nick_cmd(ctx: commands.Context, admin_channel: discord.TextChannel | None = None):
     """Post a nickname-request panel in this channel or a specified admin review channel.
@@ -578,6 +579,7 @@ async def setup_nick_cmd(ctx: commands.Context, admin_channel: discord.TextChann
 
 
 @bot.command(name="setnickreview")
+@commands.guild_only()
 @commands.has_permissions(manage_guild=True)
 async def set_nick_review_cmd(ctx: commands.Context, channel: discord.TextChannel):
     """Set the persistent review channel for nickname requests."""
@@ -591,6 +593,7 @@ async def set_nick_review_cmd(ctx: commands.Context, channel: discord.TextChanne
 
 
 @bot.command(name="getnickreview")
+@commands.guild_only()
 @commands.has_permissions(manage_guild=True)
 async def get_nick_review_cmd(ctx: commands.Context):
     """Show the configured review channel for the server."""
