@@ -473,7 +473,7 @@ class NicknameRequestView(discord.ui.View):
         super().__init__(timeout=None)
         self.admin_channel = admin_channel
 
-    @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.primary, custom_id="nickrequest:open")
+    @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.danger, custom_id="nickrequest:open")
     async def open_modal(self, button: discord.ui.Button, interaction: discord.Interaction):
         modal = NicknameRequestModal(requester=interaction.user, admin_channel=self.admin_channel)
         await interaction.response.send_modal(modal)
