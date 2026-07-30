@@ -297,6 +297,37 @@ async def on_ready():
 
 
 @bot.event
+async def on_interaction(interaction: discord.Interaction) -> None:
+    if interaction.type != discord.InteractionType.component:
+        return
+
+    custom_id = interaction.data.get("custom_id") if isinstance(interaction.data, dict) else None
+    if custom_id != "nickrequest:open":
+        return
+
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "This button can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    print(f"[nickname] raw button interaction received by {interaction.user} ({interaction.user.id})")
+    modal = NicknameRequestModal(requester=interaction.user, admin_channel=None)
+    try:
+        await interaction.response.send_modal(modal)
+    except Exception as exc:
+        print(f"[nickname] raw on_interaction failed to open modal: {exc}")
+        try:
+            await interaction.response.send_message(
+                "Unable to open nickname request modal right now. Please try again.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
+
+@bot.event
 async def on_voice_state_update(
     member: discord.Member,
     before: discord.VoiceState,
