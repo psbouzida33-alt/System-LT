@@ -525,6 +525,10 @@ class NicknameRequestView(discord.ui.View):
                 pass
 
 
+# Register persistent view handlers so button interactions continue working after restarts
+bot.add_view(NicknameRequestView())
+
+
 class AdminApproveView(discord.ui.View):
     def __init__(self, requester_id: int, requested_nick: str):
         super().__init__(timeout=None)
