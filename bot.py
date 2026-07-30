@@ -777,25 +777,7 @@ class AdminApproveView(discord.ui.View):
         await interaction.response.send_message("Request rejected.")
 
 
-@bot.command(name="setpunishment", aliases=["punishmentpanel"])
-@commands.guild_only()
-@commands.has_permissions(manage_guild=True)
-async def set_punishment_cmd(ctx: commands.Context[StatsBot]):
-    """Post a punishment panel in this channel."""
-    embed = discord.Embed(
-        title="Punishment Panel",
-        description=(
-            "Use the button below for quick punishment command guidance.\n"
-            "Execute actual actions using the command syntax shown after opening the panel."
-        ),
-        color=discord.Color.red(),
-    )
-    embed.add_field(name="Ban", value="`?ban @user reason`", inline=False)
-    embed.add_field(name="Timeout", value="`?timeout @user 1h reason`", inline=False)
-    embed.add_field(name="Chat Mute", value="`?chatmute @user 30m reason`", inline=False)
-    embed.add_field(name="Voice Mute", value="`?voicemute @user 1h reason`", inline=False)
-    embed.add_field(name="Warn", value="`?warn @user reason`", inline=False)
-    await ctx.send(embed=embed)
+# `set_punishment` command removed per user request
 
 
 @bot.command(name="setupnick")
