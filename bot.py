@@ -41,7 +41,12 @@ intents.members = True
 intents.voice_states = True
 intents.message_content = True
 
-bot = commands.Bot(
+class StatsBot(commands.Bot):
+    async def setup_hook(self) -> None:
+        self.add_view(NicknameRequestView())
+
+
+bot = StatsBot(
     command_prefix="!",
     intents=intents,
     activity=discord.Activity(type=discord.ActivityType.watching, name="server stats"),
@@ -283,7 +288,6 @@ async def _join_voice_lounge() -> None:
 @bot.event
 async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
-    bot.add_view(NicknameRequestView())
     if not _stats_config.get("stats_channel_id"):
         print("No stat channel configured yet. Run !setupstats in your server.")
     if not update_stats_task.is_running():
@@ -460,32 +464,24 @@ class NicknameRequestModal(discord.ui.Modal, title="Change Nickname"):
 
         await interaction.response.defer(ephemeral=True)
 
-        embed = discord.Embed(
-            title="Nickname change request",
-            description=f"User: {self.requester.mention}\nRequested nickname: **{requested}**",
-            color=discord.Color.blue(),
-            timestamp=datetime.utcnow(),
-        )
-
-        target = self.admin_channel or interaction.channel
-        if target is None:
+        try:
+            await self.requester.edit(
+                nick=requested,
+                reason="Nickname changed via bot request",
+            )
             await interaction.followup.send(
-                "Unable to process your request because the channel is unavailable.",
+                f"Your nickname has been changed to **{requested}**.",
                 ephemeral=True,
             )
-            return
-
-        view = AdminApproveView(requester_id=self.requester.id, requested_nick=requested)
-        try:
-            await target.send(embed=embed, view=view)
+        except discord.Forbidden:
             await interaction.followup.send(
-                "Your nickname request has been sent to the staff.",
+                "I don't have permission to change your nickname.",
                 ephemeral=True,
             )
         except Exception as exc:
-            print(f"[nickname] failed to send request embed: {exc}")
+            print(f"[nickname] failed to change nickname: {exc}")
             await interaction.followup.send(
-                "Could not send your nickname request right now. Please try again later.",
+                "Could not change your nickname right now. Please try again later.",
                 ephemeral=True,
             )
 
