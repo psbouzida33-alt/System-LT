@@ -742,30 +742,35 @@ class PunishmentModal(discord.ui.Modal, title="Punishment Details"):
 
 
 class PunishmentRequestView(discord.ui.View):
+    class MemberSelect(discord.ui.UserSelect):
+        def __init__(self, parent: "PunishmentRequestView"):
+            self.parent = parent
+            super().__init__(
+                placeholder="Select member to punish...",
+                min_values=1,
+                max_values=1,
+                custom_id="punishment:select_member",
+            )
+
+        async def callback(self, interaction: discord.Interaction) -> None:
+            selected = self.values[0]
+            if not isinstance(selected, discord.Member):
+                await interaction.response.send_message(
+                    "Please select a server member.",
+                    ephemeral=True,
+                )
+                return
+
+            self.parent.target_member = selected
+            await interaction.response.send_message(
+                f"Selected {selected.mention} for punishment.",
+                ephemeral=True,
+            )
+
     def __init__(self):
         super().__init__(timeout=None)
         self.target_member: discord.Member | None = None
-
-    @discord.ui.user_select(
-        placeholder="Select member to punish...",
-        min_values=1,
-        max_values=1,
-        custom_id="punishment:select_member",
-    )
-    async def select_member(self, interaction: discord.Interaction, select: discord.ui.UserSelect) -> None:
-        selected = select.values[0]
-        if not isinstance(selected, discord.Member):
-            await interaction.response.send_message(
-                "Please select a server member.",
-                ephemeral=True,
-            )
-            return
-
-        self.target_member = selected
-        await interaction.response.send_message(
-            f"Selected {selected.mention} for punishment.",
-            ephemeral=True,
-        )
+        self.add_item(self.MemberSelect(self))
 
     async def _open_punishment_modal(
         self,
