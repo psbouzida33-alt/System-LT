@@ -65,7 +65,7 @@ def _guild_member_count(guild: discord.Guild) -> int:
 
 
 def _stats_channel_name(count: int) -> str:
-    return f"• Members: {count}"
+    return f"👥 • Members: {count}"
 
 
 def _stats_channel_status() -> str:
