@@ -659,9 +659,15 @@ class NicknameRequestView(discord.ui.View):
 
 
 class PunishmentModal(discord.ui.Modal, title="Punishment Details"):
+    member: discord.ui.TextInput["PunishmentModal"] = discord.ui.TextInput(
+        label="Member",
+        placeholder="Mention the user or paste their ID",
+        required=True,
+        max_length=100,
+    )
     duration: discord.ui.TextInput["PunishmentModal"] = discord.ui.TextInput(
         label="Duration",
-        placeholder="30m, 1h, 1d — required for timeout/chatmute/voicemute, leave blank for ban/warn",
+        placeholder="30m, 1h, 1d — required for timeout/chatmute/voicemute",
         required=False,
         max_length=20,
     )
@@ -673,16 +679,23 @@ class PunishmentModal(discord.ui.Modal, title="Punishment Details"):
         max_length=200,
     )
 
-    def __init__(self, action: str, target: discord.Member, moderator: discord.Member):
+    def __init__(self, action: str, moderator: discord.Member):
         super().__init__()
         self.action = action
-        self.target = target
         self.moderator = moderator
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message(
                 "This command must be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        target = _resolve_member(interaction.guild, self.member.value)
+        if target is None:
+            await interaction.response.send_message(
+                "Could not find that member. Use mention, ID, or exact name.",
                 ephemeral=True,
             )
             return
@@ -717,33 +730,33 @@ class PunishmentModal(discord.ui.Modal, title="Punishment Details"):
 
         try:
             if self.action == "ban":
-                await self.target.ban(reason=reason, delete_message_days=0)
-                response = f"{self.target.mention} has been banned."
+                await target.ban(reason=reason, delete_message_days=0)
+                response = f"{target.mention} has been banned."
             elif self.action == "warn":
                 dm_text = (
                     f"You have been warned in {interaction.guild.name}.\n"
                     f"Reason: {reason}"
                 )
                 try:
-                    await self.target.send(dm_text)
+                    await target.send(dm_text)
                 except Exception:
                     pass
-                response = f"{self.target.mention} has been warned."
+                response = f"{target.mention} has been warned."
             elif self.action == "timeout":
                 assert until is not None
-                await self.target.edit(timed_out_until=until, reason=reason)
-                response = f"{self.target.mention} has been timed out until {until.isoformat()} UTC."
+                await target.edit(timed_out_until=until, reason=reason)
+                response = f"{target.mention} has been timed out until {until.isoformat()} UTC."
             elif self.action == "chatmute":
                 assert until is not None
-                await self.target.edit(timed_out_until=until, reason=f"Chat mute — {reason}")
-                response = f"{self.target.mention} has been chat-muted until {until.isoformat()} UTC."
+                await target.edit(timed_out_until=until, reason=f"Chat mute — {reason}")
+                response = f"{target.mention} has been chat-muted until {until.isoformat()} UTC."
             elif self.action == "voicemute":
                 assert until is not None
-                if self.target.voice and self.target.voice.channel:
-                    await self.target.edit(mute=True, reason=f"Voice mute — {reason}")
+                if target.voice and target.voice.channel:
+                    await target.edit(mute=True, reason=f"Voice mute — {reason}")
                 else:
-                    await self.target.edit(timed_out_until=until, reason=f"Voice mute — {reason}")
-                response = f"{self.target.mention} has been voice-muted until {until.isoformat()} UTC."
+                    await target.edit(timed_out_until=until, reason=f"Voice mute — {reason}")
+                response = f"{target.mention} has been voice-muted until {until.isoformat()} UTC."
             else:
                 response = "Unknown punishment action."
 
@@ -761,35 +774,8 @@ class PunishmentModal(discord.ui.Modal, title="Punishment Details"):
 
 
 class PunishmentRequestView(discord.ui.View):
-    class MemberSelect(discord.ui.UserSelect):
-        def __init__(self, parent_view: "PunishmentRequestView"):
-            self.parent_view = parent_view
-            super().__init__(
-                placeholder="Select member to punish...",
-                min_values=1,
-                max_values=1,
-                custom_id="punishment:select_member",
-            )
-
-        async def callback(self, interaction: discord.Interaction) -> None:
-            selected = self.values[0]
-            if not isinstance(selected, discord.Member):
-                await interaction.response.send_message(
-                    "Please select a server member.",
-                    ephemeral=True,
-                )
-                return
-
-            self.parent_view.target_member = selected
-            await interaction.response.send_message(
-                f"Selected {selected.mention} for punishment.",
-                ephemeral=True,
-            )
-
     def __init__(self):
         super().__init__(timeout=None)
-        self.target_member: discord.Member | None = None
-        self.add_item(self.MemberSelect(self))
 
     async def _open_punishment_modal(
         self,
@@ -803,15 +789,7 @@ class PunishmentRequestView(discord.ui.View):
             )
             return
 
-        target = self.target_member
-        if target is None:
-            await interaction.response.send_message(
-                "Select a member first using the dropdown.",
-                ephemeral=True,
-            )
-            return
-
-        modal = PunishmentModal(action=action, target=target, moderator=interaction.user)
+        modal = PunishmentModal(action=action, moderator=interaction.user)
         try:
             await interaction.response.send_modal(modal)
         except Exception as exc:
@@ -839,6 +817,66 @@ class PunishmentRequestView(discord.ui.View):
     @discord.ui.button(label="Warn", style=discord.ButtonStyle.primary, custom_id="punishment:warn")
     async def warn(self, interaction: discord.Interaction, button: Any) -> None:
         await self._open_punishment_modal(interaction, "warn")
+
+
+@bot.command(name="ban")
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def ban_cmd(ctx: commands.Context[StatsBot], member: discord.Member, *, reason: str):
+    await member.ban(reason=reason, delete_message_days=0)
+    await ctx.send(f"{member.mention} has been banned for: {reason}")
+
+
+@bot.command(name="timeout")
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def timeout_cmd(ctx: commands.Context[StatsBot], member: discord.Member, duration: str, *, reason: str):
+    until = _get_timeout_until(duration)
+    if until is None:
+        await ctx.send("Invalid duration format. Use 30m, 1h, or 1d.")
+        return
+    await member.edit(timed_out_until=until, reason=reason)
+    await ctx.send(f"{member.mention} timed out until {until.isoformat()} UTC for: {reason}")
+
+
+@bot.command(name="chatmute")
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def chatmute_cmd(ctx: commands.Context[StatsBot], member: discord.Member, duration: str, *, reason: str):
+    until = _get_timeout_until(duration)
+    if until is None:
+        await ctx.send("Invalid duration format. Use 30m, 1h, or 1d.")
+        return
+    await member.edit(timed_out_until=until, reason=f"Chat mute — {reason}")
+    await ctx.send(f"{member.mention} chat-muted until {until.isoformat()} UTC for: {reason}")
+
+
+@bot.command(name="voicemute")
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def voicemute_cmd(ctx: commands.Context[StatsBot], member: discord.Member, duration: str, *, reason: str):
+    until = _get_timeout_until(duration)
+    if until is None:
+        await ctx.send("Invalid duration format. Use 30m, 1h, or 1d.")
+        return
+    if member.voice and member.voice.channel:
+        await member.edit(mute=True, reason=f"Voice mute — {reason}")
+        await ctx.send(f"{member.mention} voice-muted in channel for: {reason}")
+    else:
+        await member.edit(timed_out_until=until, reason=f"Voice mute — {reason}")
+        await ctx.send(f"{member.mention} voice-muted until {until.isoformat()} UTC for: {reason}")
+
+
+@bot.command(name="warn")
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def warn_cmd(ctx: commands.Context[StatsBot], member: discord.Member, *, reason: str):
+    dm_text = f"You have been warned in {ctx.guild.name}.\nReason: {reason}"
+    try:
+        await member.send(dm_text)
+    except Exception:
+        pass
+    await ctx.send(f"{member.mention} has been warned for: {reason}")
 
 
 class AdminApproveView(discord.ui.View):
