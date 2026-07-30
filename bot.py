@@ -818,13 +818,15 @@ async def dnd_cmd(ctx: commands.Context[StatsBot], action: str | None = None):
     if action.lower() in {"on", "enable", "true", "1"}:
         _dnd_enabled = True
         save_dnd_mode(True)
-        await ctx.send("Do-Not-Disturb mode enabled. The bot will reduce notifications.")
+        await bot.change_presence(status=discord.Status.dnd)
+        await ctx.send("Do-Not-Disturb mode enabled. The bot is now DND.")
         return
 
     if action.lower() in {"off", "disable", "false", "0"}:
         _dnd_enabled = False
         save_dnd_mode(False)
-        await ctx.send("Do-Not-Disturb mode disabled. The bot will resume normal notifications.")
+        await bot.change_presence(status=discord.Status.online)
+        await ctx.send("Do-Not-Disturb mode disabled. The bot is now online.")
         return
 
     await ctx.send("Unknown action. Use `on`, `off`, or `status`.")
