@@ -47,6 +47,9 @@ bot = commands.Bot(
     activity=discord.Activity(type=discord.ActivityType.watching, name="server stats"),
 )
 
+# Register persistent view handlers so button interactions continue working after restarts
+bot.add_view(NicknameRequestView())
+
 _last_member_count: int | None = None
 _last_stats_status: str | None = None
 _stats_config = load_stats_config()
@@ -475,7 +478,13 @@ class NicknameRequestView(discord.ui.View):
 
     @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.danger, custom_id="nickrequest:open")
     async def open_modal(self, button: discord.ui.Button, interaction: discord.Interaction):
-        modal = NicknameRequestModal(requester=interaction.user, admin_channel=self.admin_channel)
+        admin_channel = self.admin_channel
+        if admin_channel is None and interaction.guild:
+            saved_id = _nick_config.get("review_channel_id")
+            if saved_id:
+                admin_channel = interaction.guild.get_channel(int(saved_id))
+
+        modal = NicknameRequestModal(requester=interaction.user, admin_channel=admin_channel)
         await interaction.response.send_modal(modal)
 
 
