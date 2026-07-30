@@ -47,9 +47,6 @@ bot = commands.Bot(
     activity=discord.Activity(type=discord.ActivityType.watching, name="server stats"),
 )
 
-# Register persistent view handlers so button interactions continue working after restarts
-bot.add_view(NicknameRequestView())
-
 _last_member_count: int | None = None
 _last_stats_status: str | None = None
 _stats_config = load_stats_config()
@@ -486,6 +483,10 @@ class NicknameRequestView(discord.ui.View):
 
         modal = NicknameRequestModal(requester=interaction.user, admin_channel=admin_channel)
         await interaction.response.send_modal(modal)
+
+
+# Register persistent view handlers so button interactions continue working after restarts
+bot.add_view(NicknameRequestView())
 
 
 class AdminApproveView(discord.ui.View):
