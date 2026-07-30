@@ -743,8 +743,8 @@ class PunishmentModal(discord.ui.Modal, title="Punishment Details"):
 
 class PunishmentRequestView(discord.ui.View):
     class MemberSelect(discord.ui.UserSelect):
-        def __init__(self, parent: "PunishmentRequestView"):
-            self.parent = parent
+        def __init__(self, parent_view: "PunishmentRequestView"):
+            self.parent_view = parent_view
             super().__init__(
                 placeholder="Select member to punish...",
                 min_values=1,
@@ -761,7 +761,7 @@ class PunishmentRequestView(discord.ui.View):
                 )
                 return
 
-            self.parent.target_member = selected
+            self.parent_view.target_member = selected
             await interaction.response.send_message(
                 f"Selected {selected.mention} for punishment.",
                 ephemeral=True,
