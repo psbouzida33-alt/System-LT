@@ -1,4 +1,5 @@
 """Legends Tunisia — bot settings (edit this file, not Render env)."""
+# Pushed: 2026-07-31 — non-functional metadata stamp
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
 
 # --- Server IDs & stats layout ---
-BOT_VOICE_CHANNEL_ID = 1532157917736730784
+BOT_VOICE_CHANNEL_ID = 1518025649225470072
 
 STATS_CATEGORY_NAME = "─── ❖ ── ⚙️ SYSTEM ZONE ⚙️ ── ❖ ───"
 
