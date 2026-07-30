@@ -80,6 +80,13 @@ def _stats_channel_status() -> str:
     return f"{emoji} {label}: {now.strftime('%H:%M:%S')}"
 
 
+async def _update_presence(status: discord.Status) -> None:
+    await bot.change_presence(
+        status=status,
+        activity=discord.Activity(type=discord.ActivityType.watching, name="server stats"),
+    )
+
+
 def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
     return {
         guild.default_role: discord.PermissionOverwrite(
@@ -327,7 +334,7 @@ async def _join_voice_lounge() -> None:
 async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
     if _dnd_enabled:
-        await bot.change_presence(status=discord.Status.dnd)
+        await _update_presence(discord.Status.dnd)
         print("Do-Not-Disturb mode restored on startup.")
     if not _stats_config.get("stats_channel_id"):
         print("No stat channel configured yet. Run ?setupstats in your server.")
@@ -821,14 +828,14 @@ async def dnd_cmd(ctx: commands.Context[StatsBot], action: str | None = None):
     if action.lower() in {"on", "enable", "true", "1"}:
         _dnd_enabled = True
         save_dnd_mode(True)
-        await bot.change_presence(status=discord.Status.dnd)
+        await _update_presence(discord.Status.dnd)
         await ctx.send("Do-Not-Disturb mode enabled. The bot is now DND.")
         return
 
     if action.lower() in {"off", "disable", "false", "0"}:
         _dnd_enabled = False
         save_dnd_mode(False)
-        await bot.change_presence(status=discord.Status.online)
+        await _update_presence(discord.Status.online)
         await ctx.send("Do-Not-Disturb mode disabled. The bot is now online.")
         return
 
