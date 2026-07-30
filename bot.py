@@ -326,6 +326,9 @@ async def _join_voice_lounge() -> None:
 @bot.event
 async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
+    if _dnd_enabled:
+        await bot.change_presence(status=discord.Status.dnd)
+        print("Do-Not-Disturb mode restored on startup.")
     if not _stats_config.get("stats_channel_id"):
         print("No stat channel configured yet. Run ?setupstats in your server.")
     if not update_stats_task.is_running():
