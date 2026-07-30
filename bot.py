@@ -122,24 +122,8 @@ def _get_timeout_until(duration: str) -> datetime | None:
     return datetime.now(timezone.utc) + parsed
 
 
-def _resolve_member(guild: discord.Guild, value: str) -> discord.Member | None:
-    value = value.strip()
-    if not value:
-        return None
-
-    if value.startswith("<@") and value.endswith(">"):
-        value = re.sub(r"[<@!>]+", "", value)
-
-    if value.isdigit():
-        member = guild.get_member(int(value))
-        if member:
-            return member
-
-    lowered = value.lower()
-    for member in guild.members:
-        if member.name.lower() == lowered or member.display_name.lower() == lowered:
-            return member
-    return None
+# `_resolve_member` was removed — it was previously used by the punishment modal
+# which was deleted. Keep this note to avoid accidental re-adds.
 
 
 async def _safe_edit_channel_name(
@@ -713,7 +697,8 @@ async def voicemute_cmd(ctx: commands.Context[StatsBot], member: discord.Member,
 @commands.guild_only()
 @commands.has_permissions(manage_guild=True)
 async def warn_cmd(ctx: commands.Context[StatsBot], member: discord.Member, *, reason: str):
-    dm_text = f"You have been warned in {ctx.guild.name}.\nReason: {reason}"
+    guild_name = ctx.guild.name if ctx.guild else "this server"
+    dm_text = f"You have been warned in {guild_name}.\nReason: {reason}"
     try:
         await member.send(dm_text)
     except Exception:
