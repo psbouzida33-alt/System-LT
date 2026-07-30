@@ -28,8 +28,6 @@ from config import (
     save_stats_config,
     load_nick_config,
     save_nick_config,
-    load_dnd_mode,
-    save_dnd_mode,
 )
 
 load_dotenv()
@@ -60,7 +58,6 @@ _last_member_count: int | None = None
 _last_stats_status: str | None = None
 _stats_config: dict[str, int | None] = load_stats_config()
 _nick_config: dict[str, int | None] = load_nick_config()
-_dnd_enabled: bool = load_dnd_mode()
 
 
 def _guild_member_count(guild: discord.Guild) -> int:
@@ -78,13 +75,6 @@ def _stats_channel_status() -> str:
     emoji, label, tz_name = WORLD_CLOCKS[index]
     now = datetime.now(ZoneInfo(tz_name))
     return f"{emoji} {label}: {now.strftime('%H:%M:%S')}"
-
-
-async def _update_presence(status: discord.Status) -> None:
-    await bot.change_presence(
-        status=status,
-        activity=discord.Activity(type=discord.ActivityType.watching, name="server stats"),
-    )
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
@@ -333,10 +323,6 @@ async def _join_voice_lounge() -> None:
 @bot.event
 async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
-    if _dnd_enabled:
-        await _update_presence(discord.Status.dnd)
-        print("Do-Not-Disturb mode restored on startup.")
-        print("Bot is online and in DND mode!")
     if not _stats_config.get("stats_channel_id"):
         print("No stat channel configured yet. Run ?setupstats in your server.")
     if not update_stats_task.is_running():
@@ -813,34 +799,7 @@ async def setup_nick_cmd(ctx: commands.Context[StatsBot], admin_channel: discord
     await ctx.send(embed=embed, view=view)
 
 
-@bot.command(name="dnd")
-@commands.guild_only()
-@commands.has_permissions(manage_guild=True)
-async def dnd_cmd(ctx: commands.Context[StatsBot], action: str | None = None):
-    """Manage Do-Not-Disturb mode for the bot.
-
-    Usage: `?dnd on` — enable, `?dnd off` — disable, `?dnd status` — show current state.
-    """
-    global _dnd_enabled
-    if action is None or action.lower() == "status":
-        await ctx.send(f"Do-Not-Disturb mode is {'ENABLED' if _dnd_enabled else 'disabled'}.")
-        return
-
-    if action.lower() in {"on", "enable", "true", "1"}:
-        _dnd_enabled = True
-        save_dnd_mode(True)
-        await _update_presence(discord.Status.dnd)
-        await ctx.send("Do-Not-Disturb mode enabled. The bot is now DND.")
-        return
-
-    if action.lower() in {"off", "disable", "false", "0"}:
-        _dnd_enabled = False
-        save_dnd_mode(False)
-        await _update_presence(discord.Status.online)
-        await ctx.send("Do-Not-Disturb mode disabled. The bot is now online.")
-        return
-
-    await ctx.send("Unknown action. Use `on`, `off`, or `status`.")
+# Do-Not-Disturb support removed per user request
 
 
 @bot.command(name="setnickreview")
