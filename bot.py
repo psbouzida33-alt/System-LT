@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import discord
@@ -47,15 +48,15 @@ class StatsBot(commands.Bot):
 
 
 bot = StatsBot(
-    command_prefix="!",
+    command_prefix="?",
     intents=intents,
     activity=discord.Activity(type=discord.ActivityType.watching, name="server stats"),
 )
 
 _last_member_count: int | None = None
 _last_stats_status: str | None = None
-_stats_config = load_stats_config()
-_nick_config = load_nick_config()
+_stats_config: dict[str, int | None] = load_stats_config()
+_nick_config: dict[str, int | None] = load_nick_config()
 
 
 def _guild_member_count(guild: discord.Guild) -> int:
@@ -75,7 +76,7 @@ def _stats_channel_status() -> str:
     return f"{emoji} {label}: {now.strftime('%H:%M:%S')}"
 
 
-def _stat_channel_overwrites(guild: discord.Guild) -> dict:
+def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
     return {
         guild.default_role: discord.PermissionOverwrite(
             connect=False,
@@ -93,7 +94,7 @@ def _get_configured_guild() -> discord.Guild | None:
 
 
 async def _safe_edit_channel_name(
-    channel: discord.abc.GuildChannel | None,
+    channel: discord.VoiceChannel | None,
     new_name: str,
     *,
     label: str,
@@ -198,7 +199,7 @@ async def refresh_all_stats(*, force_members: bool = False) -> None:
 class DummyVoiceClient(discord.VoiceProtocol):
     """Join voice without audio — keeps the bot visible in the lounge channel."""
 
-    def __init__(self, client, channel):
+    def __init__(self, client: discord.Client, channel: discord.VoiceChannel):
         self.client = client
         self.channel = channel
         self._connected = False
@@ -212,26 +213,30 @@ class DummyVoiceClient(discord.VoiceProtocol):
         self_mute: bool = True,
     ) -> None:
         # discord.py passes self_deaf=False by default — always join deafened + muted.
-        await self.channel.guild.change_voice_state(
-            channel=self.channel,
+        voice_channel = cast(discord.VoiceChannel, self.channel)
+        await voice_channel.guild.change_voice_state(
+            channel=voice_channel,
             self_deaf=True,
             self_mute=True,
         )
         self._connected = True
 
     async def disconnect(self, *, force: bool = False) -> None:
-        await self.channel.guild.change_voice_state(channel=None)
+        voice_channel = cast(discord.VoiceChannel, self.channel)
+        await voice_channel.guild.change_voice_state(channel=None)
         self._connected = False
         try:
-            key_id, _ = self.channel._get_voice_client_key()
-            self.client._connection._remove_voice_client(key_id)
+            key_id, _ = cast(Any, self.channel)._get_voice_client_key()
+            client_connection = cast(Any, getattr(self.client, "_connection", None))
+            if client_connection is not None:
+                client_connection._remove_voice_client(key_id)
         except Exception:
             pass
 
-    async def on_voice_state_update(self, data):
+    async def on_voice_state_update(self, data: Any) -> None:
         pass
 
-    async def on_voice_server_update(self, data):
+    async def on_voice_server_update(self, data: Any) -> None:
         pass
 
     def is_connected(self):
@@ -255,7 +260,7 @@ def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
     return None
 
 
-async def _ensure_voice_deafened(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
+async def _ensure_voice_deafened(guild: discord.Guild, channel: discord.VoiceChannel | discord.StageChannel) -> None:
     await guild.change_voice_state(channel=channel, self_deaf=True, self_mute=True)
 
 
@@ -277,7 +282,7 @@ async def _join_voice_lounge() -> None:
             return
 
     try:
-        await voice_channel.connect(cls=DummyVoiceClient, self_deaf=True, self_mute=True)
+        await voice_channel.connect(cls=cast(Any, DummyVoiceClient), self_deaf=True, self_mute=True)
         print(f"Connected to voice lounge (deafened): {voice_channel.name}")
     except discord.ClientException:
         pass
@@ -289,7 +294,7 @@ async def _join_voice_lounge() -> None:
 async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
     if not _stats_config.get("stats_channel_id"):
-        print("No stat channel configured yet. Run !setupstats in your server.")
+        print("No stat channel configured yet. Run ?setupstats in your server.")
     if not update_stats_task.is_running():
         update_stats_task.start()
     await _join_voice_lounge()
@@ -333,7 +338,7 @@ async def on_voice_state_update(
     before: discord.VoiceState,
     after: discord.VoiceState,
 ):
-    if member.id != bot.user.id:
+    if bot.user is None or member.id != bot.user.id:
         return
 
     if after.channel and after.channel.id == BOT_VOICE_CHANNEL_ID:
@@ -380,7 +385,7 @@ async def before_update_stats_task():
 
 
 @bot.event
-async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+async def on_command_error(ctx: commands.Context[StatsBot], error: commands.CommandError):
     if isinstance(error, commands.CommandNotFound):
         return
     if isinstance(error, commands.MissingPermissions):
@@ -394,10 +399,14 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
 
 
 @bot.command(name="setupstats")
+@commands.guild_only()
 @commands.has_permissions(manage_guild=True)
-async def setup_stats_cmd(ctx: commands.Context):
+async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
     """Create one stats voice channel: name = members, status = world clock."""
     guild = ctx.guild
+    if guild is None:
+        await ctx.send("This command can only be used in a server.")
+        return
     overwrites = _stat_channel_overwrites(guild)
     count = _guild_member_count(guild)
 
@@ -427,11 +436,11 @@ async def setup_stats_cmd(ctx: commands.Context):
             pass
 
         global _stats_config, _last_member_count, _last_stats_status
-        _stats_config = {
+        _stats_config = cast(dict[str, int | None], {
             "guild_id": guild.id,
             "category_id": category.id,
             "stats_channel_id": stats_channel.id,
-        }
+        })
         save_stats_config(_stats_config)
         _last_member_count = count
         _last_stats_status = _stats_channel_status()
@@ -458,19 +467,23 @@ async def setup_stats_cmd(ctx: commands.Context):
 
 @bot.command(name="refreshstats")
 @commands.has_permissions(manage_guild=True)
-async def refresh_stats_cmd(ctx: commands.Context):
+async def refresh_stats_cmd(ctx: commands.Context[StatsBot]):
     """Force-refresh the stats channel."""
     await refresh_all_stats(force_members=True)
     await ctx.send("Stats channel refreshed.", delete_after=8)
 
 
 @bot.command(name="ping")
-async def ping_cmd(ctx: commands.Context):
+async def ping_cmd(ctx: commands.Context[StatsBot]):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
 
 @bot.command(name="changename")
 @commands.guild_only()
-async def change_name_cmd(ctx: commands.Context, *, new_nick: str):
+async def change_name_cmd(ctx: commands.Context[StatsBot], *, new_nick: str):
+    author = ctx.author
+    if not isinstance(author, discord.Member):
+        await ctx.send("This command must be used in a server.", delete_after=10)
+        return
     new_nick = new_nick.strip()
     if not new_nick:
         await ctx.send("Please provide a new nickname.", delete_after=10)
@@ -481,7 +494,7 @@ async def change_name_cmd(ctx: commands.Context, *, new_nick: str):
         return
 
     try:
-        await ctx.author.edit(nick=new_nick, reason="Changed via bot command")
+        await cast(discord.Member, ctx.author).edit(nick=new_nick, reason="Changed via bot command")
         await ctx.send(f"Your nickname has been changed to **{new_nick}**.", delete_after=10)
     except discord.Forbidden:
         await ctx.send("I don't have permission to change your nickname.", delete_after=10)
@@ -490,13 +503,13 @@ async def change_name_cmd(ctx: commands.Context, *, new_nick: str):
 
 # --- Nickname request UI ---
 class NicknameRequestModal(discord.ui.Modal, title="Change Your Nickname"):
-    new_nick = discord.ui.TextInput(
+    new_nick: discord.ui.TextInput["NicknameRequestModal"] = discord.ui.TextInput(
         label="What should be your new nickname?",
         placeholder="Enter your new nickname...",
         max_length=32,
     )
 
-    def __init__(self, requester: discord.Member, *, admin_channel: discord.TextChannel | None):
+    def __init__(self, requester: discord.Member | discord.User, *, admin_channel: discord.abc.GuildChannel | None):
         super().__init__()
         self.requester = requester
         self.admin_channel = admin_channel
@@ -515,6 +528,13 @@ class NicknameRequestModal(discord.ui.Modal, title="Change Your Nickname"):
             return
 
         await interaction.response.defer(ephemeral=True)
+
+        if not isinstance(self.requester, discord.Member):
+            await interaction.followup.send(
+                "Could not change your nickname because you are not a server member.",
+                ephemeral=True,
+            )
+            return
 
         try:
             await self.requester.edit(
@@ -544,7 +564,7 @@ class NicknameRequestView(discord.ui.View):
         self.admin_channel = admin_channel
 
     @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.danger, custom_id="nickrequest:open")
-    async def open_modal(self, button: discord.ui.Button, interaction: discord.Interaction):
+    async def open_modal(self, interaction: discord.Interaction, button: Any):
         if interaction.guild is None:
             await interaction.response.send_message(
                 "This button can only be used inside a server.",
@@ -557,7 +577,9 @@ class NicknameRequestView(discord.ui.View):
         if admin_channel is None and interaction.guild:
             saved_id = _nick_config.get("review_channel_id")
             if saved_id:
-                admin_channel = interaction.guild.get_channel(int(saved_id))
+                saved_channel = interaction.guild.get_channel(int(saved_id))
+                if isinstance(saved_channel, discord.TextChannel):
+                    admin_channel = saved_channel
 
         # Opt-in debug quick-response: set DEBUG_NICK_QUICK_RESP=1 in the environment
         # (Render env vars) to make the button reply immediately with an ephemeral
@@ -589,6 +611,25 @@ class NicknameRequestView(discord.ui.View):
 
 # Register persistent view handlers so button interactions continue working after restarts
 bot.add_view(NicknameRequestView())
+bot.add_view(PunishmentRequestView())
+
+
+class PunishmentRequestView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Punishment Commands", style=discord.ButtonStyle.danger, custom_id="punishment:open")
+    async def open_panel(self, interaction: discord.Interaction, button: Any) -> None:
+        await interaction.response.send_message(
+            "Moderation commands:\n"
+            "• `?ban @user reason`\n"
+            "• `?timeout @user 1h reason`\n"
+            "• `?chatmute @user 30m reason`\n"
+            "• `?voicemute @user 1h reason`\n"
+            "• `?warn @user reason`\n\n"
+            "Use these commands responsibly and only for valid rule violations.",
+            ephemeral=True,
+        )
 
 
 class AdminApproveView(discord.ui.View):
@@ -597,11 +638,17 @@ class AdminApproveView(discord.ui.View):
         self.requester_id = requester_id
         self.requested_nick = requested_nick
 
-    async def _is_authorized(self, member: discord.Member) -> bool:
-        return member.guild_permissions.manage_nicknames or member.guild_permissions.manage_roles or member.guild_permissions.manage_guild
+    async def _is_authorized(self, member: discord.Member | discord.User) -> bool:
+        if not isinstance(member, discord.Member):
+            return False
+        return (
+            member.guild_permissions.manage_nicknames
+            or member.guild_permissions.manage_roles
+            or member.guild_permissions.manage_guild
+        )
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, custom_id="nickrequest:approve")
-    async def approve(self, button: discord.ui.Button, interaction: discord.Interaction):
+    async def approve(self, interaction: discord.Interaction, button: Any) -> None:
         if not await self._is_authorized(interaction.user):
             await interaction.response.send_message("You are not allowed to approve nickname requests.", ephemeral=True)
             return
@@ -621,38 +668,65 @@ class AdminApproveView(discord.ui.View):
             await interaction.response.send_message(f"Nickname for {member.mention} changed to **{self.requested_nick}**.")
             # disable buttons after action
             for child in self.children:
-                child.disabled = True
-            await interaction.message.edit(view=self)
+                if isinstance(child, discord.ui.Button):
+                    child.disabled = True
+            if interaction.message is not None:
+                await interaction.message.edit(view=self)
         except discord.Forbidden:
             await interaction.response.send_message("I don't have permission to change that member's nickname.", ephemeral=True)
         except Exception as exc:
             await interaction.response.send_message(f"Failed to change nickname: {exc}", ephemeral=True)
 
     @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="nickrequest:reject")
-    async def reject(self, button: discord.ui.Button, interaction: discord.Interaction):
+    async def reject(self, interaction: discord.Interaction, button: Any) -> None:
         if not await self._is_authorized(interaction.user):
             await interaction.response.send_message("You are not allowed to reject nickname requests.", ephemeral=True)
             return
 
         for child in self.children:
-            child.disabled = True
-        await interaction.message.edit(view=self)
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        if interaction.message is not None:
+            await interaction.message.edit(view=self)
         await interaction.response.send_message("Request rejected.")
+
+
+@bot.command(name="setpunishment", aliases=["punishmentpanel"])
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def set_punishment_cmd(ctx: commands.Context[StatsBot]):
+    """Post a punishment panel in this channel."""
+    embed = discord.Embed(
+        title="Punishment Panel",
+        description=(
+            "Use the button below for quick punishment command guidance.\n"
+            "Execute actual actions using the command syntax shown after opening the panel."
+        ),
+        color=discord.Color.red(),
+    )
+    embed.add_field(name="Ban", value="`?ban @user reason`", inline=False)
+    embed.add_field(name="Timeout", value="`?timeout @user 1h reason`", inline=False)
+    embed.add_field(name="Chat Mute", value="`?chatmute @user 30m reason`", inline=False)
+    embed.add_field(name="Voice Mute", value="`?voicemute @user 1h reason`", inline=False)
+    embed.add_field(name="Warn", value="`?warn @user reason`", inline=False)
+    await ctx.send(embed=embed, view=PunishmentRequestView())
 
 
 @bot.command(name="setupnick")
 @commands.guild_only()
 @commands.has_permissions(manage_guild=True)
-async def setup_nick_cmd(ctx: commands.Context, admin_channel: discord.TextChannel | None = None):
+async def setup_nick_cmd(ctx: commands.Context[StatsBot], admin_channel: discord.TextChannel | None = None):
     """Post a nickname-request panel in this channel or a specified admin review channel.
 
-    Usage: `!setupnick` to post in current channel, or `!setupnick #requests` to configure an admin channel.
+    Usage: `?setupnick` to post in current channel, or `?setupnick #requests` to configure an admin channel.
     """
     # If no admin_channel passed, check persisted config for this guild
     if admin_channel is None:
         saved_id = _nick_config.get("review_channel_id")
         if saved_id and ctx.guild:
-            admin_channel = ctx.guild.get_channel(int(saved_id))
+            saved_channel = ctx.guild.get_channel(int(saved_id))
+            if isinstance(saved_channel, discord.TextChannel):
+                admin_channel = saved_channel
 
     view = NicknameRequestView(admin_channel=admin_channel)
     embed = discord.Embed(
@@ -675,13 +749,13 @@ async def setup_nick_cmd(ctx: commands.Context, admin_channel: discord.TextChann
 @bot.command(name="setnickreview")
 @commands.guild_only()
 @commands.has_permissions(manage_guild=True)
-async def set_nick_review_cmd(ctx: commands.Context, channel: discord.TextChannel):
+async def set_nick_review_cmd(ctx: commands.Context[StatsBot], channel: discord.TextChannel):
     """Set the persistent review channel for nickname requests."""
     global _nick_config
     if ctx.guild is None:
         await ctx.send("This command must be run in a guild.")
         return
-    _nick_config = {"review_channel_id": channel.id, "guild_id": ctx.guild.id}
+    _nick_config = cast(dict[str, int | None], {"review_channel_id": channel.id, "guild_id": ctx.guild.id})
     save_nick_config(_nick_config)
     await ctx.send(f"Nickname review channel saved: {channel.mention}")
 
@@ -689,7 +763,7 @@ async def set_nick_review_cmd(ctx: commands.Context, channel: discord.TextChanne
 @bot.command(name="getnickreview")
 @commands.guild_only()
 @commands.has_permissions(manage_guild=True)
-async def get_nick_review_cmd(ctx: commands.Context):
+async def get_nick_review_cmd(ctx: commands.Context[StatsBot]):
     """Show the configured review channel for the server."""
     saved_id = _nick_config.get("review_channel_id")
     if not saved_id:
@@ -713,7 +787,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self._send_ok()
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 

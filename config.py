@@ -32,9 +32,9 @@ DATA_DIR = Path("data")
 STATS_CONFIG_FILE = DATA_DIR / "stats_config.json"
 
 
-def load_stats_config() -> dict:
-    """Channel IDs saved by !setupstats (persisted in data/stats_config.json)."""
-    empty = {
+def load_stats_config() -> dict[str, int | None]:
+    """Channel IDs saved by ?setupstats (persisted in data/stats_config.json)."""
+    empty: dict[str, int | None] = {
         "guild_id": None,
         "category_id": None,
         "stats_channel_id": None,
@@ -59,14 +59,19 @@ def load_stats_config() -> dict:
         return empty
 
 
-def save_stats_config(config: dict) -> None:
+def save_stats_config(config: dict[str, int | None]) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "guild_id": int(config["guild_id"]),
-        "stats_channel_id": int(config["stats_channel_id"]),
+    guild_id = config["guild_id"]
+    stats_channel_id = config["stats_channel_id"]
+    if guild_id is None or stats_channel_id is None:
+        raise ValueError("Missing required stats config values")
+    payload: dict[str, int] = {
+        "guild_id": guild_id,
+        "stats_channel_id": stats_channel_id,
     }
-    if config.get("category_id"):
-        payload["category_id"] = int(config["category_id"])
+    category_id = config.get("category_id")
+    if category_id is not None:
+        payload["category_id"] = category_id
     with open(STATS_CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
@@ -75,8 +80,8 @@ def save_stats_config(config: dict) -> None:
 NICK_CONFIG_FILE = DATA_DIR / "nick_config.json"
 
 
-def load_nick_config() -> dict:
-    empty = {"review_channel_id": None, "guild_id": None}
+def load_nick_config() -> dict[str, int | None]:
+    empty: dict[str, int | None] = {"review_channel_id": None, "guild_id": None}
     if not NICK_CONFIG_FILE.is_file():
         return empty
     try:
@@ -91,12 +96,14 @@ def load_nick_config() -> dict:
         return empty
 
 
-def save_nick_config(config: dict) -> None:
+def save_nick_config(config: dict[str, int | None]) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {}
-    if config.get("review_channel_id"):
-        payload["review_channel_id"] = int(config["review_channel_id"])
-    if config.get("guild_id"):
-        payload["guild_id"] = int(config["guild_id"])
+    payload: dict[str, int] = {}
+    review_channel_id = config.get("review_channel_id")
+    if review_channel_id is not None:
+        payload["review_channel_id"] = review_channel_id
+    guild_id = config.get("guild_id")
+    if guild_id is not None:
+        payload["guild_id"] = guild_id
     with open(NICK_CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
