@@ -369,7 +369,17 @@ def _extract_ytdl_info(url: str) -> dict[str, Any]:
     if yt_dlp is None:
         raise RuntimeError("yt_dlp is not installed")
     ytdl = yt_dlp.YoutubeDL(cast(Any, YTDL_OPTIONS))
-    return cast(dict[str, Any], ytdl.extract_info(url, download=False))
+    try:
+        return cast(dict[str, Any], ytdl.extract_info(url, download=False))
+    except Exception as exc:
+        message = str(exc)
+        if "Sign in to confirm you\'re not a bot" in message or "Sign in to confirm you are not a bot" in message:
+            print(
+                "YouTube blocked playback for this video. "
+                "Set YTDL_COOKIE_FILE to a valid cookies.txt file in the environment "
+                "or use a different song URL."
+            )
+        raise
 
 
 async def _get_stream_url(url: str) -> tuple[str, str]:
