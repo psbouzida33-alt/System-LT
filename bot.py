@@ -336,8 +336,11 @@ def _is_verification_channel(channel: discord.abc.GuildChannel | None) -> bool:
     if not isinstance(channel, discord.VoiceChannel):
         return False
     if VERIFICATION_VOICE_CHANNEL_IDS:
-        return channel.id in VERIFICATION_VOICE_CHANNEL_IDS
-    return any(keyword in channel.name.lower() for keyword in VERIFICATION_CHANNEL_KEYWORDS)
+        result = channel.id in VERIFICATION_VOICE_CHANNEL_IDS
+    else:
+        result = any(keyword in channel.name.lower() for keyword in VERIFICATION_CHANNEL_KEYWORDS)
+    print(f"_is_verification_channel: {channel.name} ({channel.id}) -> {result}")
+    return result
 
 
 def _get_guild_voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
@@ -411,7 +414,8 @@ async def _play_verification_music(channel: discord.VoiceChannel) -> None:
     guild = channel.guild
     current_vc = _get_guild_voice_client(guild)
     if current_vc is not None:
-        if getattr(current_vc, "channel", None) == channel:
+        current_channel = getattr(current_vc, "channel", None)
+        if current_channel == channel:
             vc = current_vc
             if not vc.is_playing():
                 try:
@@ -425,7 +429,16 @@ async def _play_verification_music(channel: discord.VoiceChannel) -> None:
                 except Exception as exc:
                     print(f"Failed to play verification music: {exc}")
             return
-        await _disconnect_guild_voice_client(guild)
+        try:
+            if current_vc.is_connected():
+                await current_vc.move_to(channel)
+                print(f"Moved existing voice client to verification channel {channel.name}.")
+            else:
+                await _disconnect_guild_voice_client(guild)
+                raise RuntimeError("Existing voice client not connected")
+        except Exception as exc:
+            print(f"Failed to move existing voice client: {exc}")
+            await _disconnect_guild_voice_client(guild)
 
     try:
         stream_url, title = await _get_stream_url(VERIFICATION_MUSIC_URL)
@@ -434,7 +447,8 @@ async def _play_verification_music(channel: discord.VoiceChannel) -> None:
         return
 
     try:
-        voice_client = await channel.connect()
+        voice_client = await channel.connect(self_deaf=False, self_mute=False)
+        print(f"Connected to verification channel {channel.name}.")
     except Exception as exc:
         print(f"Failed to connect to verification channel {channel.name}: {exc}")
         return
@@ -553,9 +567,14 @@ async def on_voice_state_update(
                 await _join_voice_lounge()
         return
 
-    if after.channel and isinstance(after.channel, discord.VoiceChannel) and _is_verification_channel(after.channel):
-        await _play_verification_music(after.channel)
-        return
+    if after.channel and isinstance(after.channel, discord.VoiceChannel):
+        if _is_verification_channel(after.channel):
+            print(
+                f"Voice update: {member} entered verification channel {after.channel.name} "
+                f"({after.channel.id}); starting verification music."
+            )
+            await _play_verification_music(after.channel)
+            return
 
     if before.channel and _is_verification_channel(before.channel):
         channel = member.guild.get_channel(before.channel.id)
