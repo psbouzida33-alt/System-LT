@@ -330,6 +330,23 @@ def _get_guild_voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
     return None
 
 
+def _find_waiting_voice_channel(guild: discord.Guild, exclude_ids: set[int] | None = None) -> discord.VoiceChannel | None:
+    exclude_ids = exclude_ids or set()
+    for channel in guild.voice_channels:
+        if channel.id in exclude_ids:
+            continue
+        if channel.id == BOT_VOICE_CHANNEL_ID:
+            continue
+        if VERIFICATION_VOICE_CHANNEL_IDS and channel.id in VERIFICATION_VOICE_CHANNEL_IDS:
+            continue
+        if _is_verification_channel(channel):
+            continue
+        human_members = [m for m in channel.members if not m.bot]
+        if human_members:
+            return channel
+    return None
+
+
 async def _disconnect_guild_voice_client(guild: discord.Guild) -> None:
     client = _get_guild_voice_client(guild)
     if client is None:
@@ -505,6 +522,15 @@ async def on_voice_state_update(
         return
 
     if after.channel and _is_verification_channel(after.channel):
+        waiting_channel = _find_waiting_voice_channel(member.guild, exclude_ids={after.channel.id, BOT_VOICE_CHANNEL_ID})
+        if waiting_channel is not None:
+            try:
+                await member.move_to(waiting_channel)
+                print(f"Moved {member.display_name} from {after.channel.name} to waiting channel {waiting_channel.name}")
+                return
+            except Exception as exc:
+                print(f"Failed to move member to waiting channel: {exc}")
+
         await _play_verification_music(after.channel)
         return
 
