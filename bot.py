@@ -262,14 +262,14 @@ class DummyVoiceClient(discord.VoiceProtocol):
         timeout: float,
         reconnect: bool,
         self_deaf: bool = True,
-        self_mute: bool = True,
+        self_mute: bool = False,
     ) -> None:
-        # discord.py passes self_deaf=False by default — always join deafened + muted.
+        # discord.py passes self_deaf=False by default — always join deafened, but not muted.
         voice_channel = cast(discord.VoiceChannel, self.channel)
         await voice_channel.guild.change_voice_state(
             channel=voice_channel,
             self_deaf=True,
-            self_mute=True,
+            self_mute=False,
         )
         self._connected = True
 
@@ -406,7 +406,7 @@ async def _play_verification_music(channel: discord.VoiceChannel) -> None:
 
 
 async def _ensure_voice_deafened(guild: discord.Guild, channel: discord.VoiceChannel | discord.StageChannel) -> None:
-    await guild.change_voice_state(channel=channel, self_deaf=True, self_mute=True)
+    await guild.change_voice_state(channel=channel, self_deaf=True, self_mute=False)
 
 
 async def _join_voice_lounge() -> None:
