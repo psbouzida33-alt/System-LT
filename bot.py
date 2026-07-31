@@ -59,8 +59,11 @@ YTDL_OPTIONS: dict[str, Any] = {
             "player_client": "android",
         }
     },
-    "cookiefile": os.getenv("YTDL_COOKIE_FILE", ""),
 }
+
+YT_DLP_COOKIE_FILE = os.getenv("YTDL_COOKIE_FILE")
+if YT_DLP_COOKIE_FILE:
+    YTDL_OPTIONS["cookiefile"] = YT_DLP_COOKIE_FILE
 
 FFMPEG_OPTIONS: dict[str, Any] = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
