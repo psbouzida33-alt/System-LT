@@ -18,17 +18,39 @@ from dotenv import load_dotenv
 
 from config import (
     BOT_VOICE_CHANNEL_ID,
+    VERIFICATION_VOICE_CHANNEL_IDS,
     CLOCK_ROTATION_SECONDS,
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
     STATS_CATEGORY_NAME,
     TOKEN,
+    VERIFICATION_CHANNEL_KEYWORDS,
+    VERIFICATION_MUSIC_URL,
     WORLD_CLOCKS,
     load_stats_config,
     save_stats_config,
     load_nick_config,
     save_nick_config,
 )
+
+try:
+    import yt_dlp
+except ImportError:
+    yt_dlp = None
+
+YTDL_OPTIONS = {
+    "format": "bestaudio/best",
+    "quiet": True,
+    "no_warnings": True,
+    "default_search": "auto",
+    "source_address": "0.0.0.0",
+    "noplaylist": True,
+}
+
+FFMPEG_OPTIONS = {
+    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+    "options": "-vn",
+}
 
 load_dotenv()
 
@@ -290,6 +312,99 @@ def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
     return None
 
 
+def _is_verification_channel(channel: discord.abc.GuildChannel | None) -> bool:
+    if not isinstance(channel, discord.VoiceChannel):
+        return False
+    if VERIFICATION_VOICE_CHANNEL_IDS:
+        return channel.id in VERIFICATION_VOICE_CHANNEL_IDS
+    return (
+        channel.name is not None
+        and any(keyword in channel.name.lower() for keyword in VERIFICATION_CHANNEL_KEYWORDS)
+    )
+
+
+def _get_guild_voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
+    for client in bot.voice_clients:
+        if client.guild.id == guild.id:
+            return client
+    return None
+
+
+async def _disconnect_guild_voice_client(guild: discord.Guild) -> None:
+    client = _get_guild_voice_client(guild)
+    if client is None:
+        return
+    try:
+        await client.disconnect(force=True)
+    except Exception as exc:
+        print(f"Failed to disconnect voice client: {exc}")
+
+
+async def _restore_lounge_voice(guild: discord.Guild) -> None:
+    voice_channel = _find_voice_lounge_channel()
+    if voice_channel is None or voice_channel.guild.id != guild.id:
+        return
+    await _disconnect_guild_voice_client(guild)
+    await _join_voice_lounge()
+
+
+def _extract_ytdl_info(url: str) -> dict[str, Any]:
+    if yt_dlp is None:
+        raise RuntimeError("yt_dlp is not installed")
+    ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+    return ytdl.extract_info(url, download=False)
+
+
+async def _get_stream_url(url: str) -> tuple[str, str]:
+    loop = asyncio.get_running_loop()
+    info = await loop.run_in_executor(None, lambda: _extract_ytdl_info(url))
+    if "entries" in info:
+        info = info["entries"][0]
+    return str(info["url"]), str(info.get("title", url))
+
+
+async def _play_verification_music(channel: discord.VoiceChannel) -> None:
+    guild = channel.guild
+    current_vc = _get_guild_voice_client(guild)
+    if current_vc is not None:
+        if getattr(current_vc, "channel", None) == channel:
+            if not current_vc.is_playing():
+                try:
+                    stream_url, title = await _get_stream_url(VERIFICATION_MUSIC_URL)
+                    source = discord.PCMVolumeTransformer(
+                        discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS),
+                        volume=0.25,
+                    )
+                    current_vc.play(source)
+                    print(f"Playing verification music in {channel.name}: {title}")
+                except Exception as exc:
+                    print(f"Failed to play verification music: {exc}")
+            return
+        await _disconnect_guild_voice_client(guild)
+
+    try:
+        stream_url, title = await _get_stream_url(VERIFICATION_MUSIC_URL)
+    except Exception as exc:
+        print(f"Failed to resolve verification music URL: {exc}")
+        return
+
+    try:
+        voice_client = await channel.connect()
+    except Exception as exc:
+        print(f"Failed to connect to verification channel {channel.name}: {exc}")
+        return
+
+    try:
+        source = discord.PCMVolumeTransformer(
+            discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS),
+            volume=0.25,
+        )
+        voice_client.play(source)
+        print(f"Connected to {channel.name} and playing verification music: {title}")
+    except Exception as exc:
+        print(f"Failed to play verification music in {channel.name}: {exc}")
+
+
 async def _ensure_voice_deafened(guild: discord.Guild, channel: discord.VoiceChannel | discord.StageChannel) -> None:
     await guild.change_voice_state(channel=channel, self_deaf=True, self_mute=True)
 
@@ -370,21 +485,35 @@ async def on_voice_state_update(
     before: discord.VoiceState,
     after: discord.VoiceState,
 ):
-    if bot.user is None or member.id != bot.user.id:
+    if bot.user is None:
         return
 
-    if after.channel and after.channel.id == BOT_VOICE_CHANNEL_ID:
-        if not after.self_deaf or not after.self_mute:
-            await asyncio.sleep(0.5)
-            try:
-                await _ensure_voice_deafened(member.guild, after.channel)
-            except Exception as exc:
-                print(f"Failed to enforce deafen in lounge: {exc}")
+    if member.id == bot.user.id:
+        if after.channel and after.channel.id == BOT_VOICE_CHANNEL_ID:
+            if not after.self_deaf or not after.self_mute:
+                await asyncio.sleep(0.5)
+                try:
+                    await _ensure_voice_deafened(member.guild, after.channel)
+                except Exception as exc:
+                    print(f"Failed to enforce deafen in lounge: {exc}")
+            return
+
+        if before.channel and before.channel.id == BOT_VOICE_CHANNEL_ID:
+            if after.channel is None or not _is_verification_channel(after.channel):
+                await asyncio.sleep(2)
+                await _join_voice_lounge()
         return
 
-    if before.channel and before.channel.id == BOT_VOICE_CHANNEL_ID:
-        await asyncio.sleep(2)
-        await _join_voice_lounge()
+    if after.channel and _is_verification_channel(after.channel):
+        await _play_verification_music(after.channel)
+        return
+
+    if before.channel and _is_verification_channel(before.channel):
+        channel = member.guild.get_channel(before.channel.id)
+        if isinstance(channel, discord.VoiceChannel):
+            human_members = [m for m in channel.members if not m.bot]
+            if not human_members:
+                await _restore_lounge_voice(member.guild)
 
 
 @bot.event
