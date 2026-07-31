@@ -17,7 +17,7 @@ VERIFICATION_VOICE_CHANNEL_IDS: tuple[int, ...] = (
     1517597478378143937,
     1517666468593143940,
 )
-VERIFICATION_CHANNEL_KEYWORDS = ("verification",)
+VERIFICATION_CHANNEL_KEYWORDS = ("verification", "verify")
 VERIFICATION_MUSIC_URL = "https://www.youtube.com/watch?v=7gtIh5dF9Xk"
 
 STATS_CATEGORY_NAME = "─── ❖ ── ⚙️ SYSTEM ZONE ⚙️ ── ❖ ───"
