@@ -571,7 +571,7 @@ async def on_voice_state_update(
         if _is_verification_channel(after.channel):
             print(
                 f"Voice update: {member} entered verification channel {after.channel.name} "
-                f"({after.channel.id}); starting verification music."
+                f"({after.channel.id}); starting verification music with {VERIFICATION_MUSIC_URL}"
             )
             await _play_verification_music(after.channel)
             return
