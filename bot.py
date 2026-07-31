@@ -38,7 +38,7 @@ try:
 except ImportError:
     yt_dlp = None
 
-YTDL_OPTIONS = {
+YTDL_OPTIONS: dict[str, Any] = {
     "format": "bestaudio/best",
     "quiet": True,
     "no_warnings": True,
@@ -47,7 +47,7 @@ YTDL_OPTIONS = {
     "noplaylist": True,
 }
 
-FFMPEG_OPTIONS = {
+FFMPEG_OPTIONS: dict[str, Any] = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
 }
@@ -317,15 +317,12 @@ def _is_verification_channel(channel: discord.abc.GuildChannel | None) -> bool:
         return False
     if VERIFICATION_VOICE_CHANNEL_IDS:
         return channel.id in VERIFICATION_VOICE_CHANNEL_IDS
-    return (
-        channel.name is not None
-        and any(keyword in channel.name.lower() for keyword in VERIFICATION_CHANNEL_KEYWORDS)
-    )
+    return any(keyword in channel.name.lower() for keyword in VERIFICATION_CHANNEL_KEYWORDS)
 
 
 def _get_guild_voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
     for client in bot.voice_clients:
-        if client.guild.id == guild.id:
+        if isinstance(client, discord.VoiceClient) and client.guild.id == guild.id:
             return client
     return None
 
@@ -351,8 +348,8 @@ async def _restore_lounge_voice(guild: discord.Guild) -> None:
 def _extract_ytdl_info(url: str) -> dict[str, Any]:
     if yt_dlp is None:
         raise RuntimeError("yt_dlp is not installed")
-    ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
-    return ytdl.extract_info(url, download=False)
+    ytdl = yt_dlp.YoutubeDL(cast(Any, YTDL_OPTIONS))
+    return cast(dict[str, Any], ytdl.extract_info(url, download=False))
 
 
 async def _get_stream_url(url: str) -> tuple[str, str]:
@@ -363,19 +360,37 @@ async def _get_stream_url(url: str) -> tuple[str, str]:
     return str(info["url"]), str(info.get("title", url))
 
 
+def _schedule_verification_music_replay(channel: discord.VoiceChannel, error: Exception | None) -> None:
+    if error is not None:
+        print(f"Verification music playback ended with error: {error}")
+        return
+    try:
+        bot.loop.call_soon_threadsafe(asyncio.create_task, _play_verification_music(channel))
+    except Exception as exc:
+        print(f"Failed to schedule verification replay: {exc}")
+
+
+def _make_verification_replay_callback(channel: discord.VoiceChannel):
+    def _callback(error: Exception | None) -> None:
+        _schedule_verification_music_replay(channel, error)
+
+    return _callback
+
+
 async def _play_verification_music(channel: discord.VoiceChannel) -> None:
     guild = channel.guild
     current_vc = _get_guild_voice_client(guild)
     if current_vc is not None:
         if getattr(current_vc, "channel", None) == channel:
-            if not current_vc.is_playing():
+            vc = current_vc
+            if not vc.is_playing():
                 try:
                     stream_url, title = await _get_stream_url(VERIFICATION_MUSIC_URL)
                     source = discord.PCMVolumeTransformer(
-                        discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS),
+                        cast(Any, discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)),
                         volume=0.25,
                     )
-                    current_vc.play(source)
+                    vc.play(source, after=_make_verification_replay_callback(channel))
                     print(f"Playing verification music in {channel.name}: {title}")
                 except Exception as exc:
                     print(f"Failed to play verification music: {exc}")
@@ -396,10 +411,10 @@ async def _play_verification_music(channel: discord.VoiceChannel) -> None:
 
     try:
         source = discord.PCMVolumeTransformer(
-            discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS),
+            cast(Any, discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)),
             volume=0.25,
         )
-        voice_client.play(source)
+        voice_client.play(source, after=_make_verification_replay_callback(channel))
         print(f"Connected to {channel.name} and playing verification music: {title}")
     except Exception as exc:
         print(f"Failed to play verification music in {channel.name}: {exc}")
@@ -418,17 +433,21 @@ async def _join_voice_lounge() -> None:
     member = voice_channel.guild.me
     if member and member.voice and member.voice.channel:
         if member.voice.channel.id == BOT_VOICE_CHANNEL_ID:
-            if not member.voice.self_deaf or not member.voice.self_mute:
+            if member.voice.self_deaf or member.voice.self_mute:
                 try:
-                    await _ensure_voice_deafened(voice_channel.guild, voice_channel)
-                    print("Re-applied deafen/mute in voice lounge.")
+                    await _ensure_voice_unmuted(voice_channel.guild, voice_channel)
+                    print("Re-applied unmute/undeaf in voice lounge.")
                 except Exception as exc:
-                    print(f"Failed to deafen in voice lounge: {exc}")
+                    print(f"Failed to restore audio state in voice lounge: {exc}")
+            current_vc = _get_guild_voice_client(voice_channel.guild)
+            if current_vc is not None and not current_vc.is_playing():
+                await _play_verification_music(voice_channel)
             return
 
     try:
-        await voice_channel.connect(cls=cast(Any, DummyVoiceClient), self_deaf=False, self_mute=False)
+        await voice_channel.connect(self_deaf=False, self_mute=False)
         print(f"Connected to voice lounge (unmuted): {voice_channel.name}")
+        await _play_verification_music(voice_channel)
     except discord.ClientException:
         pass
     except Exception as exc:
@@ -504,7 +523,7 @@ async def on_voice_state_update(
                 await _join_voice_lounge()
         return
 
-    if after.channel and _is_verification_channel(after.channel):
+    if after.channel and isinstance(after.channel, discord.VoiceChannel) and _is_verification_channel(after.channel):
         await _play_verification_music(after.channel)
         return
 
