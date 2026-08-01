@@ -3,9 +3,12 @@ Legends Tunisia — Server Stats Bot
 Updates locked voice channels: member count + live clock.
 """
 import asyncio
+import json
 import os
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, cast
@@ -23,6 +26,7 @@ from config import (
     MEMBER_COUNT_EXCLUDE_BOTS,
     STATS_CATEGORY_NAME,
     TOKEN,
+    GEMINI_API_KEY,
     WORLD_CLOCKS,
     load_stats_config,
     save_stats_config,
@@ -77,23 +81,61 @@ def _stats_channel_status() -> str:
     return f"{emoji} {label}: {now.strftime('%H:%M:%S')}"
 
 
-def _is_ai_channel_target(channel_id: int | None) -> bool:
-    return channel_id is not None and channel_id == AI_CHANNEL_ID
+def _gemini_reply(message_text: str) -> str | None:
+    if not GEMINI_API_KEY:
+        print("Gemini API key is not configured.")
+        return None
 
+    url = f"https://gemini.googleapis.com/v1/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}"
+    request_body = {
+        "prompt": {
+            "messages": [
+                {
+                    "author": "user",
+                    "content": [
+                        {"type": "text", "text": message_text}
+                    ],
+                }
+            ]
+        },
+        "temperature": 0.7,
+        "max_output_tokens": 512,
+    }
 
-def _build_ai_reply(message_text: str) -> str:
-    text = message_text.strip()
-    if not text:
-        return "أقدر أساعدك في هذا القناة. اكتب سؤالك أو طلبك."
+    try:
+        request_data = json.dumps(request_body).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=request_data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.load(response)
 
-    lower_text = text.lower()
-    if any(keyword in lower_text for keyword in ("مرحبا", "hello", "hi", "salut")):
-        return "مرحبا! أنا مساعد هذا القناة وأقدر أساعدك. اكتب سؤالك أو طلبك."
-    if any(keyword in lower_text for keyword in ("ساعدني", "help", "مساعدة", "أحتاج")):
-        return "أقدر أساعدك. فقط اكتب سؤالك أو طلبك وسأحاول الإجابة بطريقة واضحة."
-    if any(keyword in lower_text for keyword in ("شكرا", "thank", "thanks")):
-        return "مرحبًا، أنا سعيد بالhelp. إذا أردت شيء آخر، أخبرني."
-    return "أفهم طلبك وأقدر أساعدك في هذا القناة. اكتب المزيد من التفاصيل إذا أردت إجابة أدق."
+        candidates = payload.get("candidates") or []
+        if candidates:
+            candidate = candidates[0]
+            content = candidate.get("content")
+            if isinstance(content, list):
+                return "".join(
+                    item.get("text", "") for item in content if isinstance(item, dict)
+                ).strip()
+            if isinstance(content, str):
+                return content.strip()
+            return str(candidate.get("output") or candidate.get("text") or "").strip()
+
+        if "output" in payload and isinstance(payload["output"], dict):
+            return str(payload["output"].get("text", "")).strip()
+
+        return None
+    except urllib.error.HTTPError as exc:
+        print(f"Gemini HTTP error: {exc.code} {exc.reason}")
+    except urllib.error.URLError as exc:
+        print(f"Gemini URL error: {exc}")
+    except Exception as exc:
+        print(f"Gemini request failed: {exc}")
+    return None
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
@@ -292,18 +334,27 @@ async def _join_voice_lounge() -> None:
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
         return
+
     if message.content.startswith("?"):
-        return
-    if not _is_ai_channel_target(message.channel.id):
-        return
-    if not message.content.strip():
+        await bot.process_commands(message)
         return
 
-    reply = _build_ai_reply(message.content)
-    try:
-        await message.channel.send(reply)
-    except Exception as exc:
-        print(f"AI channel reply failed: {exc}")
+    if message.channel.id != AI_CHANNEL_ID:
+        await bot.process_commands(message)
+        return
+
+    if not message.content.strip():
+        await bot.process_commands(message)
+        return
+
+    reply = _gemini_reply(message.content)
+    if reply:
+        try:
+            await message.channel.send(reply)
+        except Exception as exc:
+            print(f"Failed to send Gemini reply: {exc}")
+
+    await bot.process_commands(message)
 
 
 @bot.event
@@ -370,7 +421,7 @@ async def on_voice_state_update(
             return
 
         if before.channel and before.channel.id == BOT_VOICE_CHANNEL_ID:
-            if after.channel is None or not _is_verification_channel(after.channel):
+            if after.channel is None or after.channel.id != BOT_VOICE_CHANNEL_ID:
                 await asyncio.sleep(2)
                 await _join_voice_lounge()
         return
