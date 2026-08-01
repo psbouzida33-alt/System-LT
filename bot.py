@@ -483,6 +483,20 @@ async def refresh_stats_cmd(ctx: commands.Context[StatsBot]):
     await ctx.send("Stats channel refreshed.", delete_after=8)
 
 
+@bot.command(name="restartvoicelounge")
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def restart_voice_lounge_cmd(ctx: commands.Context[StatsBot]):
+    """Restart the bot's voice connection in the lounge channel."""
+    guild = ctx.guild
+    if guild is None:
+        await ctx.send("This command can only be used inside a server.")
+        return
+    await _disconnect_guild_voice_client(guild)
+    await _join_voice_lounge()
+    await ctx.send("Voice lounge restart requested.", delete_after=10)
+
+
 @bot.command(name="ping")
 async def ping_cmd(ctx: commands.Context[StatsBot]):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
