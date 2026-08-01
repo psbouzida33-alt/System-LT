@@ -16,14 +16,13 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from config import (
+    AI_CHANNEL_ID,
     BOT_VOICE_CHANNEL_ID,
-    VERIFICATION_VOICE_CHANNEL_IDS,
     CLOCK_ROTATION_SECONDS,
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
     STATS_CATEGORY_NAME,
     TOKEN,
-    VERIFICATION_CHANNEL_KEYWORDS,
     WORLD_CLOCKS,
     load_stats_config,
     save_stats_config,
@@ -76,6 +75,25 @@ def _stats_channel_status() -> str:
     emoji, label, tz_name = WORLD_CLOCKS[index]
     now = datetime.now(ZoneInfo(tz_name))
     return f"{emoji} {label}: {now.strftime('%H:%M:%S')}"
+
+
+def _is_ai_channel_target(channel_id: int | None) -> bool:
+    return channel_id is not None and channel_id == AI_CHANNEL_ID
+
+
+def _build_ai_reply(message_text: str) -> str:
+    text = message_text.strip()
+    if not text:
+        return "أقدر أساعدك في هذا القناة. اكتب سؤالك أو طلبك."
+
+    lower_text = text.lower()
+    if any(keyword in lower_text for keyword in ("مرحبا", "hello", "hi", "salut")):
+        return "مرحبا! أنا مساعد هذا القناة وأقدر أساعدك. اكتب سؤالك أو طلبك."
+    if any(keyword in lower_text for keyword in ("ساعدني", "help", "مساعدة", "أحتاج")):
+        return "أقدر أساعدك. فقط اكتب سؤالك أو طلبك وسأحاول الإجابة بطريقة واضحة."
+    if any(keyword in lower_text for keyword in ("شكرا", "thank", "thanks")):
+        return "مرحبًا، أنا سعيد بالhelp. إذا أردت شيء آخر، أخبرني."
+    return "أفهم طلبك وأقدر أساعدك في هذا القناة. اكتب المزيد من التفاصيل إذا أردت إجابة أدق."
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
@@ -213,17 +231,6 @@ def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
     return None
 
 
-def _is_verification_channel(channel: discord.abc.GuildChannel | None) -> bool:
-    if not isinstance(channel, discord.VoiceChannel):
-        return False
-    if VERIFICATION_VOICE_CHANNEL_IDS:
-        result = channel.id in VERIFICATION_VOICE_CHANNEL_IDS
-    else:
-        result = any(keyword in channel.name.lower() for keyword in VERIFICATION_CHANNEL_KEYWORDS)
-    print(f"_is_verification_channel: {channel.name} ({channel.id}) -> {result}")
-    return result
-
-
 def _get_guild_voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
     for client in bot.voice_clients:
         if isinstance(client, discord.VoiceClient) and client.guild.id == guild.id:
@@ -279,6 +286,24 @@ async def _join_voice_lounge() -> None:
         pass
     except Exception as exc:
         print(f"Failed to join voice lounge: {exc}")
+
+
+@bot.event
+async def on_message(message: discord.Message) -> None:
+    if message.author.bot:
+        return
+    if message.content.startswith("?"):
+        return
+    if not _is_ai_channel_target(message.channel.id):
+        return
+    if not message.content.strip():
+        return
+
+    reply = _build_ai_reply(message.content)
+    try:
+        await message.channel.send(reply)
+    except Exception as exc:
+        print(f"AI channel reply failed: {exc}")
 
 
 @bot.event
@@ -350,14 +375,7 @@ async def on_voice_state_update(
                 await _join_voice_lounge()
         return
 
-    if after.channel and isinstance(after.channel, discord.VoiceChannel) and _is_verification_channel(after.channel):
-        print(
-            f"Voice update: {member} entered verification channel {after.channel.name} "
-            f"({after.channel.id}); verification channel detected, no music playback."
-        )
-        return
-
-    if before.channel and _is_verification_channel(before.channel):
+    if before.channel and before.channel.id == BOT_VOICE_CHANNEL_ID:
         channel = member.guild.get_channel(before.channel.id)
         if isinstance(channel, discord.VoiceChannel):
             human_members = [m for m in channel.members if not m.bot]
