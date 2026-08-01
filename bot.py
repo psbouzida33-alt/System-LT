@@ -142,34 +142,45 @@ def _gemini_reply(message_text: str) -> str | None:
         "generativelanguage.googleapis.com",
         "gemini.googleapis.com",
     ]
+    versions = ["v1beta2", "v1"]
 
     for model_name, request_body in model_requests:
         request_data = json.dumps(request_body).encode("utf-8")
         for host in hosts:
-            url = f"https://{host}/v1beta2/models/{model_name}:generate?key={GEMINI_API_KEY}"
-            try:
-                print(f"Gemini request URL: {url}")
-                request = urllib.request.Request(
-                    url,
-                    data=request_data,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(request, timeout=30) as response:
-                    payload: dict[str, Any] = json.load(response)
-                return _parse_payload(payload)
-            except urllib.error.HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
-                print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
-                if exc.code == 404:
-                    continue
-                return None
-            except urllib.error.URLError as exc:
-                print(f"Gemini URL error: {exc} (url={url})")
-                return None
-            except Exception as exc:
-                print(f"Gemini request failed: {exc} (url={url})")
-                return None
+            for version in versions:
+                for use_query_key in (False, True):
+                    url = f"https://{host}/{version}/models/{model_name}:generate"
+                    headers = {"Content-Type": "application/json"}
+                    if use_query_key:
+                        url = f"{url}?key={GEMINI_API_KEY}"
+                    else:
+                        headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
+
+                    try:
+                        print(f"Gemini request URL: {url}")
+                        request = urllib.request.Request(
+                            url,
+                            data=request_data,
+                            headers=headers,
+                            method="POST",
+                        )
+                        with urllib.request.urlopen(request, timeout=30) as response:
+                            payload: dict[str, Any] = json.load(response)
+                        return _parse_payload(payload)
+                    except urllib.error.HTTPError as exc:
+                        body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+                        print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
+                        if exc.code == 404:
+                            continue
+                        if exc.code in (401, 403) and use_query_key:
+                            continue
+                        return None
+                    except urllib.error.URLError as exc:
+                        print(f"Gemini URL error: {exc} (url={url})")
+                        return None
+                    except Exception as exc:
+                        print(f"Gemini request failed: {exc} (url={url})")
+                        return None
 
     return None
 
@@ -704,6 +715,7 @@ class NicknameRequestView(discord.ui.View):
 
     @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.danger, custom_id="nickrequest:open")
     async def open_modal(self, interaction: discord.Interaction, button: Any):
+        del button
         if interaction.guild is None:
             await interaction.response.send_message(
                 "This button can only be used inside a server.",
@@ -768,6 +780,7 @@ class AdminApproveView(discord.ui.View):
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, custom_id="nickrequest:approve")
     async def approve(self, interaction: discord.Interaction, button: Any) -> None:
+        del button
         if not await self._is_authorized(interaction.user):
             await interaction.response.send_message("You are not allowed to approve nickname requests.", ephemeral=True)
             return
@@ -798,6 +811,7 @@ class AdminApproveView(discord.ui.View):
 
     @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="nickrequest:reject")
     async def reject(self, interaction: discord.Interaction, button: Any) -> None:
+        del button
         if not await self._is_authorized(interaction.user):
             await interaction.response.send_message("You are not allowed to reject nickname requests.", ephemeral=True)
             return
@@ -892,7 +906,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self._send_ok()
 
     def log_message(self, format: str, *args: Any) -> None:
-        pass
+        del format, args
 
 
 def _start_health_server() -> None:
