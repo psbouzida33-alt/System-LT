@@ -4,10 +4,9 @@ Updates locked voice channels: member count + live clock.
 """
 import asyncio
 import os
-import re
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -94,31 +93,6 @@ def _get_configured_guild() -> discord.Guild | None:
     if not guild_id:
         return bot.guilds[0] if len(bot.guilds) == 1 else None
     return bot.get_guild(int(guild_id))
-
-
-def _parse_duration(duration: str) -> timedelta | None:
-    duration = duration.strip().lower()
-    if not duration:
-        return None
-    match = re.fullmatch(r"(\d+)\s*([smhd])", duration)
-    if not match:
-        return None
-    value = int(match.group(1))
-    unit = match.group(2)
-    seconds = {
-        "s": 1,
-        "m": 60,
-        "h": 3600,
-        "d": 86400,
-    }[unit]
-    return timedelta(seconds=value * seconds)
-
-
-def _get_timeout_until(duration: str) -> datetime | None:
-    parsed = _parse_duration(duration)
-    if parsed is None:
-        return None
-    return datetime.now(timezone.utc) + parsed
 
 
 # `_resolve_member` was removed — it was previously used by the punishment modal
@@ -646,67 +620,6 @@ class NicknameRequestView(discord.ui.View):
 
 
 # Punishment panel removed per user request — modal and view code deleted
-
-
-@bot.command(name="ban")
-@commands.guild_only()
-@commands.has_permissions(manage_guild=True)
-async def ban_cmd(ctx: commands.Context[StatsBot], member: discord.Member, *, reason: str):
-    await member.ban(reason=reason, delete_message_days=0)
-    await ctx.send(f"{member.mention} has been banned for: {reason}")
-
-
-@bot.command(name="timeout")
-@commands.guild_only()
-@commands.has_permissions(manage_guild=True)
-async def timeout_cmd(ctx: commands.Context[StatsBot], member: discord.Member, duration: str, *, reason: str):
-    until = _get_timeout_until(duration)
-    if until is None:
-        await ctx.send("Invalid duration format. Use 30m, 1h, or 1d.")
-        return
-    await member.edit(timed_out_until=until, reason=reason)
-    await ctx.send(f"{member.mention} timed out until {until.isoformat()} UTC for: {reason}")
-
-
-@bot.command(name="chatmute")
-@commands.guild_only()
-@commands.has_permissions(manage_guild=True)
-async def chatmute_cmd(ctx: commands.Context[StatsBot], member: discord.Member, duration: str, *, reason: str):
-    until = _get_timeout_until(duration)
-    if until is None:
-        await ctx.send("Invalid duration format. Use 30m, 1h, or 1d.")
-        return
-    await member.edit(timed_out_until=until, reason=f"Chat mute — {reason}")
-    await ctx.send(f"{member.mention} chat-muted until {until.isoformat()} UTC for: {reason}")
-
-
-@bot.command(name="voicemute")
-@commands.guild_only()
-@commands.has_permissions(manage_guild=True)
-async def voicemute_cmd(ctx: commands.Context[StatsBot], member: discord.Member, duration: str, *, reason: str):
-    until = _get_timeout_until(duration)
-    if until is None:
-        await ctx.send("Invalid duration format. Use 30m, 1h, or 1d.")
-        return
-    if member.voice and member.voice.channel:
-        await member.edit(mute=True, reason=f"Voice mute — {reason}")
-        await ctx.send(f"{member.mention} voice-muted in channel for: {reason}")
-    else:
-        await member.edit(timed_out_until=until, reason=f"Voice mute — {reason}")
-        await ctx.send(f"{member.mention} voice-muted until {until.isoformat()} UTC for: {reason}")
-
-
-@bot.command(name="warn")
-@commands.guild_only()
-@commands.has_permissions(manage_guild=True)
-async def warn_cmd(ctx: commands.Context[StatsBot], member: discord.Member, *, reason: str):
-    guild_name = ctx.guild.name if ctx.guild else "this server"
-    dm_text = f"You have been warned in {guild_name}.\nReason: {reason}"
-    try:
-        await member.send(dm_text)
-    except Exception:
-        pass
-    await ctx.send(f"{member.mention} has been warned for: {reason}")
 
 
 class AdminApproveView(discord.ui.View):
