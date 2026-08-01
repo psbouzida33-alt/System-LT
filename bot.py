@@ -88,9 +88,9 @@ def _gemini_reply(message_text: str) -> str | None:
         return None
 
     urls = [
-        f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}",
         f"https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}",
-        f"https://gemini.googleapis.com/v1/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}",
+        f"https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generate?key={GEMINI_API_KEY}",
+        f"https://gemini.googleapis.com/v1beta2/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}",
     ]
     request_body: dict[str, Any] = {
         "prompt": {
