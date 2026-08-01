@@ -87,7 +87,11 @@ def _gemini_reply(message_text: str) -> str | None:
         print("Gemini API key is not configured.")
         return None
 
-    url = f"https://gemini.googleapis.com/v1/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}"
+    urls = [
+        f"https://gemini.googleapis.com/v1/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}",
+        f"https://gemini.googleapis.com/v1beta2/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}",
+        f"https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}",
+    ]
     request_body: dict[str, Any] = {
         "prompt": {
             "messages": [
@@ -102,18 +106,9 @@ def _gemini_reply(message_text: str) -> str | None:
         "temperature": 0.7,
         "max_output_tokens": 512,
     }
+    request_data = json.dumps(request_body).encode("utf-8")
 
-    try:
-        request_data = json.dumps(request_body).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=request_data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload: dict[str, Any] = json.load(response)
-
+    def _parse_payload(payload: dict[str, Any]) -> str | None:
         candidates: list[Any] = payload.get("candidates") or []
         if candidates:
             candidate: Any = candidates[0]
@@ -135,12 +130,32 @@ def _gemini_reply(message_text: str) -> str | None:
             return str(output_dict.get("text", "")).strip()
 
         return None
-    except urllib.error.HTTPError as exc:
-        print(f"Gemini HTTP error: {exc.code} {exc.reason}")
-    except urllib.error.URLError as exc:
-        print(f"Gemini URL error: {exc}")
-    except Exception as exc:
-        print(f"Gemini request failed: {exc}")
+
+    for url in urls:
+        try:
+            print(f"Gemini request URL: {url}")
+            request = urllib.request.Request(
+                url,
+                data=request_data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload: dict[str, Any] = json.load(response)
+            return _parse_payload(payload)
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+            print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
+            if exc.code == 404:
+                continue
+            return None
+        except urllib.error.URLError as exc:
+            print(f"Gemini URL error: {exc} (url={url})")
+            return None
+        except Exception as exc:
+            print(f"Gemini request failed: {exc} (url={url})")
+            return None
+
     return None
 
 
