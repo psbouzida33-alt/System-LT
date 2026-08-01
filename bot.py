@@ -45,6 +45,7 @@ intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 intents.voice_states = True
+intents.guild_messages = True
 intents.message_content = True
 
 class StatsBot(commands.Bot):
@@ -87,7 +88,7 @@ def _gemini_reply(message_text: str) -> str | None:
         return None
 
     url = f"https://gemini.googleapis.com/v1/models/gemini-1.5-pro:generate?key={GEMINI_API_KEY}"
-    request_body = {
+    request_body: dict[str, Any] = {
         "prompt": {
             "messages": [
                 {
@@ -111,22 +112,27 @@ def _gemini_reply(message_text: str) -> str | None:
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.load(response)
+            payload: dict[str, Any] = json.load(response)
 
-        candidates = payload.get("candidates") or []
+        candidates: list[Any] = payload.get("candidates") or []
         if candidates:
-            candidate = candidates[0]
-            content = candidate.get("content")
-            if isinstance(content, list):
+            candidate: Any = candidates[0]
+            content_value: Any = candidate.get("content")
+            if isinstance(content_value, list):
+                content_list = cast(list[Any], content_value)
                 return "".join(
-                    item.get("text", "") for item in content if isinstance(item, dict)
+                    str(cast(dict[str, Any], item).get("text", ""))
+                    for item in content_list
+                    if isinstance(item, dict)
                 ).strip()
-            if isinstance(content, str):
-                return content.strip()
+            if isinstance(content_value, str):
+                return content_value.strip()
             return str(candidate.get("output") or candidate.get("text") or "").strip()
 
-        if "output" in payload and isinstance(payload["output"], dict):
-            return str(payload["output"].get("text", "")).strip()
+        output_value: Any = payload.get("output")
+        if isinstance(output_value, dict):
+            output_dict = cast(dict[str, Any], output_value)
+            return str(output_dict.get("text", "")).strip()
 
         return None
     except urllib.error.HTTPError as exc:
@@ -343,16 +349,24 @@ async def on_message(message: discord.Message) -> None:
         await bot.process_commands(message)
         return
 
+    if not GEMINI_API_KEY:
+        print("AI channel message received but Gemini API key is not configured.")
+        await bot.process_commands(message)
+        return
+
     if not message.content.strip():
         await bot.process_commands(message)
         return
 
-    reply = _gemini_reply(message.content)
+    print(f"AI channel message received: {message.author} -> {message.channel.id}")
+    reply = await asyncio.to_thread(_gemini_reply, message.content)
     if reply:
         try:
             await message.channel.send(reply)
         except Exception as exc:
             print(f"Failed to send Gemini reply: {exc}")
+    else:
+        print("Gemini replied with no content.")
 
     await bot.process_commands(message)
 
@@ -364,6 +378,8 @@ async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
     if not _stats_config.get("stats_channel_id"):
         print("No stat channel configured yet. Run ?setupstats in your server.")
+    if not GEMINI_API_KEY:
+        print("Gemini API key is not configured. AI channel replies will be disabled.")
     if not update_stats_task.is_running():
         update_stats_task.start()
     await _join_voice_lounge()
