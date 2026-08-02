@@ -88,6 +88,9 @@ def _gemini_reply(message_text: str) -> str | None:
         print("Gemini API key is not configured.")
         return None
 
+    # Use a single confirmed production model endpoint to avoid
+    # legacy/alternative endpoints that may return 404s in some
+    # deployment environments. Keep payload shaped for Gemini v1.
     request_targets: list[tuple[str, str, str, dict[str, Any]]] = [
         (
             "gemini.googleapis.com",
@@ -104,35 +107,6 @@ def _gemini_reply(message_text: str) -> str | None:
                         }
                     ]
                 },
-                "temperature": 0.7,
-                "max_output_tokens": 512,
-            },
-        ),
-        (
-            "gemini.googleapis.com",
-            "v1",
-            "gemini-1.5",
-            {
-                "prompt": {
-                    "messages": [
-                        {
-                            "author": "user",
-                            "content": [
-                                {"type": "text", "text": message_text}
-                            ],
-                        }
-                    ]
-                },
-                "temperature": 0.7,
-                "max_output_tokens": 512,
-            },
-        ),
-        (
-            "generativelanguage.googleapis.com",
-            "v1beta2",
-            "text-bison-001",
-            {
-                "prompt": {"text": message_text},
                 "temperature": 0.7,
                 "max_output_tokens": 512,
             },
@@ -191,49 +165,41 @@ def _gemini_reply(message_text: str) -> str | None:
 
     for host, version, model_name, request_body in request_targets:
         request_data = json.dumps(request_body).encode("utf-8")
-        base_url = f"https://{host}/{version}/models/{model_name}:generate"
+        url = f"https://{host}/{version}/models/{model_name}:generate"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}
 
-        for use_query_key in (False, True):
-            url = base_url
-            headers = {"Content-Type": "application/json"}
-            if use_query_key:
-                url = f"{url}?key={GEMINI_API_KEY}"
-            else:
-                headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
+        try:
+            print(f"Gemini request URL: {url}")
+            print(f"Gemini request body: {json.dumps(request_body)[:1000]}")
+            request = urllib.request.Request(
+                url,
+                data=request_data,
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload: dict[str, Any] = json.load(response)
 
-            try:
-                print(f"Gemini request URL: {url}")
-                print(f"Gemini request body: {json.dumps(request_body)[:1000]}")
-                request = urllib.request.Request(
-                    url,
-                    data=request_data,
-                    headers=headers,
-                    method="POST",
+            print(f"Gemini response keys: {list(payload.keys())}")
+            parsed = _parse_payload(payload)
+            if parsed is None:
+                print(
+                    "Gemini response parsed no text. "
+                    f"Payload keys: {list(payload.keys())}; "
+                    f"payload snippet: {json.dumps(payload)[:1000]}"
                 )
-                with urllib.request.urlopen(request, timeout=30) as response:
-                    payload: dict[str, Any] = json.load(response)
-
-                parsed = _parse_payload(payload)
-                if parsed is None:
-                    print(
-                        "Gemini response parsed no text. "
-                        f"Payload keys: {list(payload.keys())}; "
-                        f"payload snippet: {json.dumps(payload)[:1000]}"
-                    )
-                return parsed
-            except urllib.error.HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
-                print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
-                if exc.code in (404, 401, 403, 400):
-                    continue
-                return None
-            except urllib.error.URLError as exc:
-                print(f"Gemini URL error: {exc} (url={url})")
-                continue
-            except Exception as exc:
-                print(f"Gemini request failed: {exc} (url={url})")
-                continue
-    return None
+            return parsed
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+            print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
+            # don't retry different hosts here — single host only
+            return None
+        except urllib.error.URLError as exc:
+            print(f"Gemini URL error: {exc} (url={url})")
+            return None
+        except Exception as exc:
+            print(f"Gemini request failed: {exc} (url={url})")
+            return None
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
