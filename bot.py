@@ -113,13 +113,9 @@ def _gemini_reply(message_text: str) -> str | None:
         if candidates:
             candidate: Any = candidates[0]
             content_value: Any = candidate.get("content")
-            if isinstance(content_value, list):
-                content_list = cast(list[Any], content_value)
-                return "".join(
-                    str(cast(dict[str, Any], item).get("text", ""))
-                    for item in content_list
-                    if isinstance(item, dict)
-                ).strip()
+            parsed = _extract_text_from_content(content_value)
+            if parsed:
+                return parsed
             if isinstance(content_value, str):
                 return content_value.strip()
             return str(candidate.get("output") or candidate.get("text") or "").strip()
@@ -127,21 +123,49 @@ def _gemini_reply(message_text: str) -> str | None:
         output_value: Any = payload.get("output")
         if isinstance(output_value, dict):
             output_dict = cast(dict[str, Any], output_value)
-            return str(output_dict.get("text", "")).strip()
+            parsed = _extract_text_from_content(output_dict.get("text") or output_dict.get("content"))
+            if parsed:
+                return parsed
+            text_value = output_dict.get("text")
+            if isinstance(text_value, str):
+                return text_value.strip()
+            return ""
 
         return None
 
-    hosts = [
-        "generativelanguage.googleapis.com",
-        "gemini.googleapis.com",
-    ]
-    versions = ["v1beta2", "v1"]
+    hosts = ["gemini.googleapis.com"]
+    versions = ["v1"]
+
+    def _extract_text_from_content(content_value: Any) -> str | None:
+        if isinstance(content_value, list):
+            parts: list[str] = []
+            for item in content_value:
+                if isinstance(item, dict):
+                    item_dict = cast(dict[str, Any], item)
+                    text = _extract_text_from_content(item_dict.get("text") or item_dict.get("content"))
+                    if text:
+                        parts.append(text)
+                elif isinstance(item, str):
+                    parts.append(item)
+            return "".join(parts).strip() if parts else None
+
+        if isinstance(content_value, dict):
+            content_dict = cast(dict[str, Any], content_value)
+            text_value = content_dict.get("text")
+            if isinstance(text_value, str):
+                return text_value.strip()
+            return _extract_text_from_content(content_dict.get("content"))
+
+        if isinstance(content_value, str):
+            return content_value.strip()
+
+        return None
 
     for model_name, request_body in model_requests:
         request_data = json.dumps(request_body).encode("utf-8")
         for host in hosts:
             for version in versions:
-                for use_query_key in (False, True):
+                for use_query_key in (True, False):
                     url = f"https://{host}/{version}/models/{model_name}:generate"
                     headers = {"Content-Type": "application/json"}
                     if use_query_key:
@@ -159,6 +183,7 @@ def _gemini_reply(message_text: str) -> str | None:
                         )
                         with urllib.request.urlopen(request, timeout=30) as response:
                             payload: dict[str, Any] = json.load(response)
+
                         parsed = _parse_payload(payload)
                         if parsed is None:
                             print(
@@ -170,7 +195,7 @@ def _gemini_reply(message_text: str) -> str | None:
                     except urllib.error.HTTPError as exc:
                         body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
                         print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
-                        if exc.code == 404 or exc.code in (401, 403):
+                        if exc.code in (404, 401, 403):
                             continue
                         return None
                     except urllib.error.URLError as exc:
