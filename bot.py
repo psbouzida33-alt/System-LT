@@ -87,31 +87,36 @@ def _gemini_reply(message_text: str) -> str | None:
     if not GEMINI_API_KEY:
         print("Gemini API key is not configured.")
         return None
+    # Build a list of request attempts depending on the provided key.
+    # If the env value looks like a Google API key (starts with "AIza"),
+    # use the older generativelanguage/text-bison API with the key query param.
+    # Otherwise assume it's an OAuth/service token and attempt the Gemini
+    # production endpoint with Bearer auth. We'll try whichever is applicable
+    # and log details for diagnostics.
+    attempts: list[tuple[str, dict[str, str], dict[str, Any]]] = []
 
-    # Use a single confirmed production model endpoint to avoid
-    # legacy/alternative endpoints that may return 404s in some
-    # deployment environments. Keep payload shaped for Gemini v1.
-    request_targets: list[tuple[str, str, str, dict[str, Any]]] = [
-        (
-            "gemini.googleapis.com",
-            "v1",
-            "gemini-1.5-pro",
-            {
-                "prompt": {
-                    "messages": [
-                        {
-                            "author": "user",
-                            "content": [
-                                {"type": "text", "text": message_text}
-                            ],
-                        }
-                    ]
-                },
-                "temperature": 0.7,
-                "max_output_tokens": 512,
-            },
-        ),
-    ]
+    if isinstance(GEMINI_API_KEY, str) and GEMINI_API_KEY.startswith("AIza"):
+        # Generative Language API (API key auth)
+        host = "generativelanguage.googleapis.com"
+        version = "v1beta2"
+        model_name = "text-bison-001"
+        url = f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}"
+        headers = {"Content-Type": "application/json"}
+        request_body = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
+        attempts.append((url, headers, request_body))
+    else:
+        # Gemini v1 production endpoint with Bearer token
+        host = "gemini.googleapis.com"
+        version = "v1"
+        model_name = "gemini-1.5-pro"
+        url = f"https://{host}/{version}/models/{model_name}:generate"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}
+        request_body = {
+            "prompt": {"messages": [{"author": "user", "content": [{"type": "text", "text": message_text}]}]},
+            "temperature": 0.7,
+            "max_output_tokens": 512,
+        }
+        attempts.append((url, headers, request_body))
 
     def _parse_payload(payload: dict[str, Any]) -> str | None:
         candidates: list[Any] = payload.get("candidates") or []
@@ -163,13 +168,10 @@ def _gemini_reply(message_text: str) -> str | None:
 
         return None
 
-    for host, version, model_name, request_body in request_targets:
+    for url, headers, request_body in attempts:
         request_data = json.dumps(request_body).encode("utf-8")
-        url = f"https://{host}/{version}/models/{model_name}:generate"
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}
-
         try:
-            print(f"Gemini request URL: {url}")
+            print(f"Gemini request URL: {_redact_url(url)}")
             print(f"Gemini request body: {json.dumps(request_body)[:1000]}")
             request = urllib.request.Request(
                 url,
@@ -191,15 +193,17 @@ def _gemini_reply(message_text: str) -> str | None:
             return parsed
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
-            print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
-            # don't retry different hosts here — single host only
-            return None
+            print(f"Gemini HTTP error: {exc.code} {getattr(exc, 'reason', '')}; url={_redact_url(url)}; body={body}")
+            # Try next attempt if available
+            continue
         except urllib.error.URLError as exc:
-            print(f"Gemini URL error: {exc} (url={url})")
-            return None
+            print(f"Gemini URL error: {exc} (url={_redact_url(url)})")
+            continue
         except Exception as exc:
-            print(f"Gemini request failed: {exc} (url={url})")
-            return None
+            print(f"Gemini request failed: {exc} (url={_redact_url(url)})")
+            continue
+
+    return None
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
