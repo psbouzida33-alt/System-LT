@@ -83,6 +83,60 @@ def _stats_channel_status() -> str:
     return f"{emoji} {label}: {now.strftime('%H:%M:%S')}"
 
 
+def _extract_text_from_content(content_value: Any) -> str | None:
+    if isinstance(content_value, list):
+        parts: list[str] = []
+        for raw_item in content_value:
+            if isinstance(raw_item, dict):
+                text = _extract_text_from_content(raw_item.get("text") or raw_item.get("content"))
+                if text:
+                    parts.append(text)
+            elif isinstance(raw_item, str):
+                parts.append(raw_item)
+        return "".join(parts).strip() if parts else None
+
+    if isinstance(content_value, dict):
+        text_value = content_value.get("text")
+        if isinstance(text_value, str):
+            return text_value.strip()
+        return _extract_text_from_content(content_value.get("content"))
+
+    if isinstance(content_value, str):
+        return content_value.strip()
+
+    return None
+
+
+def _parse_response_payload(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+
+    candidates = payload.get("candidates")
+    if isinstance(candidates, list) and candidates:
+        candidate = candidates[0]
+        if isinstance(candidate, dict):
+            content_value = candidate.get("content")
+            parsed = _extract_text_from_content(content_value)
+            if parsed:
+                return parsed
+            if isinstance(content_value, str):
+                return content_value.strip()
+            output_text = candidate.get("output") or candidate.get("text")
+            if isinstance(output_text, str):
+                return output_text.strip()
+        return None
+
+    output_value = payload.get("output")
+    if isinstance(output_value, dict):
+        parsed = _extract_text_from_content(output_value.get("text") or output_value.get("content"))
+        if parsed:
+            return parsed
+        text_value = output_value.get("text")
+        if isinstance(text_value, str):
+            return text_value.strip()
+    return None
+
+
 def _gemini_reply(message_text: str) -> str | None:
     if not GEMINI_API_KEY:
         print("Gemini API key is not configured.")
@@ -97,7 +151,7 @@ def _gemini_reply(message_text: str) -> str | None:
     host = "gemini.googleapis.com"
     version = "v1"
     model_name = "gemini-1.5-pro"
-    request_body = {
+    request_body: dict[str, Any] = {
         "prompt": {"messages": [{"author": "user", "content": [{"type": "text", "text": message_text}]}]},
         "temperature": 0.7,
         "max_output_tokens": 512,
@@ -112,7 +166,7 @@ def _gemini_reply(message_text: str) -> str | None:
         )
     )
 
-    if isinstance(GEMINI_API_KEY, str) and GEMINI_API_KEY.strip():
+    if GEMINI_API_KEY:
         # 2) API key attempt on Gemini v1 endpoint
         attempts.append(
             (
@@ -126,7 +180,7 @@ def _gemini_reply(message_text: str) -> str | None:
         legacy_host = "generativelanguage.googleapis.com"
         legacy_version = "v1beta2"
         legacy_model = "text-bison-001"
-        legacy_body = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
+        legacy_body: dict[str, Any] = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
         attempts.append(
             (
                 f"https://{legacy_host}/{legacy_version}/models/{legacy_model}:generate?key={GEMINI_API_KEY}",
@@ -139,7 +193,7 @@ def _gemini_reply(message_text: str) -> str | None:
         flash_host = "generativelanguage.googleapis.com"
         flash_version = "v1beta"
         flash_model = "gemini-flash-latest"
-        flash_body = {"contents": [{"parts": [{"text": message_text}]}]}
+        flash_body: dict[str, Any] = {"contents": [{"parts": [{"text": message_text}]}]}
         attempts.append(
             (
                 f"https://{flash_host}/{flash_version}/models/{flash_model}:generateContent",
@@ -147,7 +201,6 @@ def _gemini_reply(message_text: str) -> str | None:
                 flash_body,
             )
         )
-    }
 
     def _parse_payload(payload: dict[str, Any]) -> str | None:
         candidates: list[Any] = payload.get("candidates") or []
@@ -743,7 +796,7 @@ def _gemini_diag_request(message_text: str) -> dict[str, object]:
     host = "gemini.googleapis.com"
     version = "v1"
     model_name = "gemini-1.5-pro"
-    request_body = {
+    request_body: dict[str, Any] = {
         "prompt": {"messages": [{"author": "user", "content": [{"type": "text", "text": message_text}]}]},
         "temperature": 0.7,
         "max_output_tokens": 512,
@@ -786,7 +839,7 @@ def _gemini_diag_request(message_text: str) -> dict[str, object]:
                 result["status"] = getattr(resp, "status", None)
                 result["keys"] = list(payload.keys()) if isinstance(payload, dict) else None
                 result["body_snippet"] = json.dumps(payload)[:1000]
-                result["parsed"] = _extract_text_from_content(payload.get("candidates") or payload.get("output") or []) if isinstance(payload, dict) else None
+                result["parsed"] = _parse_response_payload(payload)
                 return result
         except urllib.error.HTTPError as exc:
             body_text = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
@@ -823,7 +876,7 @@ async def ai_diag_cmd(ctx: commands.Context[StatsBot], *, prompt: str = "hello")
     else:
         lines.append(f"Parsed text present: no")
     body = diag.get("body_snippet")
-    if body:
+    if isinstance(body, str):
         lines.append(f"Body (truncated): {body[:400]}")
 
     await ctx.send("\n".join(lines), delete_after=60)
