@@ -88,8 +88,10 @@ def _gemini_reply(message_text: str) -> str | None:
         print("Gemini API key is not configured.")
         return None
 
-    model_requests: list[tuple[str, dict[str, Any]]] = [
+    request_targets: list[tuple[str, str, str, dict[str, Any]]] = [
         (
+            "gemini.googleapis.com",
+            "v1",
             "gemini-1.5-pro",
             {
                 "prompt": {
@@ -102,6 +104,35 @@ def _gemini_reply(message_text: str) -> str | None:
                         }
                     ]
                 },
+                "temperature": 0.7,
+                "max_output_tokens": 512,
+            },
+        ),
+        (
+            "gemini.googleapis.com",
+            "v1",
+            "gemini-1.5",
+            {
+                "prompt": {
+                    "messages": [
+                        {
+                            "author": "user",
+                            "content": [
+                                {"type": "text", "text": message_text}
+                            ],
+                        }
+                    ]
+                },
+                "temperature": 0.7,
+                "max_output_tokens": 512,
+            },
+        ),
+        (
+            "generativelanguage.googleapis.com",
+            "v1beta2",
+            "text-bison-001",
+            {
+                "prompt": {"text": message_text},
                 "temperature": 0.7,
                 "max_output_tokens": 512,
             },
@@ -133,9 +164,6 @@ def _gemini_reply(message_text: str) -> str | None:
 
         return None
 
-    hosts = ["gemini.googleapis.com"]
-    versions = ["v1"]
-
     def _extract_text_from_content(content_value: Any) -> str | None:
         if isinstance(content_value, list):
             parts: list[str] = []
@@ -161,49 +189,47 @@ def _gemini_reply(message_text: str) -> str | None:
 
         return None
 
-    for model_name, request_body in model_requests:
+    for host, version, model_name, request_body in request_targets:
         request_data = json.dumps(request_body).encode("utf-8")
-        for host in hosts:
-            for version in versions:
-                for use_query_key in (True, False):
-                    url = f"https://{host}/{version}/models/{model_name}:generate"
-                    headers = {"Content-Type": "application/json"}
-                    if use_query_key:
-                        url = f"{url}?key={GEMINI_API_KEY}"
-                    else:
-                        headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
+        for use_query_key in (True, False):
+            url = f"https://{host}/{version}/models/{model_name}:generate"
+            headers = {"Content-Type": "application/json"}
+            if use_query_key:
+                url = f"{url}?key={GEMINI_API_KEY}"
+            else:
+                headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
 
-                    try:
-                        print(f"Gemini request URL: {url} (query_key={use_query_key})")
-                        request = urllib.request.Request(
-                            url,
-                            data=request_data,
-                            headers=headers,
-                            method="POST",
-                        )
-                        with urllib.request.urlopen(request, timeout=30) as response:
-                            payload: dict[str, Any] = json.load(response)
+            try:
+                print(f"Gemini request URL: {url} (query_key={use_query_key})")
+                request = urllib.request.Request(
+                    url,
+                    data=request_data,
+                    headers=headers,
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    payload: dict[str, Any] = json.load(response)
 
-                        parsed = _parse_payload(payload)
-                        if parsed is None:
-                            print(
-                                "Gemini response parsed no text. "
-                                f"Payload keys: {list(payload.keys())}; "
-                                f"payload snippet: {json.dumps(payload)[:1000]}"
-                            )
-                        return parsed
-                    except urllib.error.HTTPError as exc:
-                        body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
-                        print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
-                        if exc.code in (404, 401, 403):
-                            continue
-                        return None
-                    except urllib.error.URLError as exc:
-                        print(f"Gemini URL error: {exc} (url={url})")
-                        return None
-                    except Exception as exc:
-                        print(f"Gemini request failed: {exc} (url={url})")
-                        return None
+                parsed = _parse_payload(payload)
+                if parsed is None:
+                    print(
+                        "Gemini response parsed no text. "
+                        f"Payload keys: {list(payload.keys())}; "
+                        f"payload snippet: {json.dumps(payload)[:1000]}"
+                    )
+                return parsed
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+                print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
+                if exc.code in (404, 401, 403):
+                    continue
+                return None
+            except urllib.error.URLError as exc:
+                print(f"Gemini URL error: {exc} (url={url})")
+                return None
+            except Exception as exc:
+                print(f"Gemini request failed: {exc} (url={url})")
+                return None
 
     return None
 
