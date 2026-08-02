@@ -685,6 +685,94 @@ async def chat_cmd(ctx: commands.Context[StatsBot], *, prompt: str):
     else:
         await ctx.send("AI did not return a response. Please try again later.", delete_after=15)
 
+
+def _redact_url(url: str) -> str:
+    return re.sub(r"([?&]key=)[^&\s]+", r"\1[REDACTED]", url)
+
+
+def _gemini_diag_request(message_text: str) -> dict[str, object]:
+    result: dict[str, object] = {
+        "url": "",
+        "status": None,
+        "reason": "",
+        "keys": None,
+        "parsed": None,
+        "body_snippet": "",
+    }
+
+    if not GEMINI_API_KEY:
+        result["reason"] = "no_api_key"
+        return result
+
+    host = "gemini.googleapis.com"
+    version = "v1"
+    model_name = "gemini-1.5-pro"
+    request_body = {
+        "prompt": {"messages": [{"author": "user", "content": [{"type": "text", "text": message_text}]}]},
+        "temperature": 0.7,
+        "max_output_tokens": 512,
+    }
+
+    url = f"https://{host}/{version}/models/{model_name}:generate"
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}
+    result["url"] = _redact_url(url)
+
+    try:
+        req = urllib.request.Request(url, data=json.dumps(request_body).encode("utf-8"), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.load(resp)
+            result["status"] = getattr(resp, "status", None)
+            result["keys"] = list(payload.keys()) if isinstance(payload, dict) else None
+            # Attempt to parse using existing parser logic
+            parsed = None
+            try:
+                parsed = (lambda p: (  # tiny inline reuse of parsing from _gemini_reply
+                    None
+                ))(payload)
+            except Exception:
+                parsed = None
+            result["parsed"] = parsed
+            result["body_snippet"] = json.dumps(payload)[:1000]
+            return result
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+        result["status"] = exc.code
+        result["reason"] = str(exc.reason)
+        result["body_snippet"] = body[:1000]
+        return result
+    except Exception as exc:
+        result["reason"] = str(exc)
+        return result
+
+
+@bot.command(name="ai_diag")
+@commands.has_permissions(administrator=True)
+async def ai_diag_cmd(ctx: commands.Context[StatsBot], *, prompt: str = "hello"):
+    """Admin-only diagnostic: run a single Gemini request and report status (no secrets)."""
+    await ctx.send("Running AI diagnostic (admin-only)…", delete_after=5)
+    diag = await asyncio.to_thread(_gemini_diag_request, prompt)
+    lines: list[str] = []
+    lines.append(f"URL: {diag.get('url')}")
+    status = diag.get("status")
+    if status:
+        lines.append(f"Status: {status}")
+    reason = diag.get("reason")
+    if reason:
+        lines.append(f"Reason: {reason}")
+    keys = diag.get("keys")
+    if keys:
+        lines.append(f"Response keys: {keys}")
+    parsed = diag.get("parsed")
+    if parsed:
+        lines.append(f"Parsed text present: yes")
+    else:
+        lines.append(f"Parsed text present: no")
+    body = diag.get("body_snippet")
+    if body:
+        lines.append(f"Body (truncated): {body[:400]}")
+
+    await ctx.send("\n".join(lines), delete_after=60)
+
 @bot.command(name="changename")
 @commands.guild_only()
 async def change_name_cmd(ctx: commands.Context[StatsBot], *, new_nick: str):
