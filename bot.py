@@ -5,6 +5,7 @@ Updates locked voice channels: member count + live clock.
 import asyncio
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -101,14 +102,6 @@ def _gemini_reply(message_text: str) -> str | None:
                         }
                     ]
                 },
-                "temperature": 0.7,
-                "max_output_tokens": 512,
-            },
-        ),
-        (
-            "text-bison-001",
-            {
-                "prompt": {"text": message_text},
                 "temperature": 0.7,
                 "max_output_tokens": 512,
             },
@@ -386,6 +379,28 @@ async def on_message(message: discord.Message) -> None:
         await bot.process_commands(message)
         return
 
+    if bot.user is not None and bot.user in message.mentions:
+        if not GEMINI_API_KEY:
+            print("AI mention received but Gemini API key is not configured.")
+            await bot.process_commands(message)
+            return
+
+        prompt_text = re.sub(rf"<@!?(?:{bot.user.id})>", "", message.content).strip()
+        if not prompt_text:
+            await bot.process_commands(message)
+            return
+
+        print(f"AI mention received: {message.author} -> {message.channel.id}")
+        reply = await asyncio.to_thread(_gemini_reply, prompt_text)
+        if reply:
+            try:
+                await message.channel.send(reply)
+            except Exception as exc:
+                print(f"Failed to send Gemini reply: {exc}")
+        else:
+            print("Gemini replied with no content.")
+        return
+
     if message.channel.id != AI_CHANNEL_ID:
         await bot.process_commands(message)
         return
@@ -639,7 +654,8 @@ async def chat_cmd(ctx: commands.Context[StatsBot], *, prompt: str):
         await ctx.send("AI is not configured on this bot.", delete_after=10)
         return
 
-    await ctx.trigger_typing()
+    if ctx.channel is not None:
+        await ctx.channel.trigger_typing()
     reply = await asyncio.to_thread(_gemini_reply, prompt)
     if reply:
         await ctx.send(reply)
