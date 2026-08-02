@@ -150,7 +150,7 @@ def _gemini_reply(message_text: str) -> str | None:
                         headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
 
                     try:
-                        print(f"Gemini request URL: {url}")
+                        print(f"Gemini request URL: {url} (query_key={use_query_key})")
                         request = urllib.request.Request(
                             url,
                             data=request_data,
@@ -159,13 +159,18 @@ def _gemini_reply(message_text: str) -> str | None:
                         )
                         with urllib.request.urlopen(request, timeout=30) as response:
                             payload: dict[str, Any] = json.load(response)
-                        return _parse_payload(payload)
+                        parsed = _parse_payload(payload)
+                        if parsed is None:
+                            print(
+                                "Gemini response parsed no text. "
+                                f"Payload keys: {list(payload.keys())}; "
+                                f"payload snippet: {json.dumps(payload)[:1000]}"
+                            )
+                        return parsed
                     except urllib.error.HTTPError as exc:
                         body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
                         print(f"Gemini HTTP error: {exc.code} {exc.reason}; url={url}; body={body}")
-                        if exc.code == 404:
-                            continue
-                        if exc.code in (401, 403) and use_query_key:
+                        if exc.code == 404 or exc.code in (401, 403):
                             continue
                         return None
                     except urllib.error.URLError as exc:
