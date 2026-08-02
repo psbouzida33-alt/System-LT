@@ -139,14 +139,14 @@ def _gemini_reply(message_text: str) -> str | None:
     def _extract_text_from_content(content_value: Any) -> str | None:
         if isinstance(content_value, list):
             parts: list[str] = []
-            for item in content_value:
-                if isinstance(item, dict):
-                    item_dict = cast(dict[str, Any], item)
+            for raw_item in cast(list[object], content_value):
+                if isinstance(raw_item, dict):
+                    item_dict = cast(dict[str, Any], raw_item)
                     text = _extract_text_from_content(item_dict.get("text") or item_dict.get("content"))
                     if text:
                         parts.append(text)
-                elif isinstance(item, str):
-                    parts.append(item)
+                elif isinstance(raw_item, str):
+                    parts.append(raw_item)
             return "".join(parts).strip() if parts else None
 
         if isinstance(content_value, dict):
