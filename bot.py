@@ -87,36 +87,54 @@ def _gemini_reply(message_text: str) -> str | None:
     if not GEMINI_API_KEY:
         print("Gemini API key is not configured.")
         return None
-    # Build a list of request attempts depending on the provided key.
-    # If the env value looks like a Google API key (starts with "AIza"),
-    # use the older generativelanguage/text-bison API with the key query param.
-    # Otherwise assume it's an OAuth/service token and attempt the Gemini
-    # production endpoint with Bearer auth. We'll try whichever is applicable
-    # and log details for diagnostics.
+    # Build a list of request attempts to support both OAuth-style Gemini
+    # tokens and API keys. The service may accept:
+    #  1. gemini.googleapis.com/v1/models/gemini-1.5-pro:generate with Bearer auth
+    #  2. gemini.googleapis.com/v1/models/gemini-1.5-pro:generate?key=APIKEY
+    #  3. generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generate?key=APIKEY
     attempts: list[tuple[str, dict[str, str], dict[str, Any]]] = []
 
-    if isinstance(GEMINI_API_KEY, str) and GEMINI_API_KEY.startswith("AIza"):
-        # Generative Language API (API key auth)
-        host = "generativelanguage.googleapis.com"
-        version = "v1beta2"
-        model_name = "text-bison-001"
-        url = f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}"
-        headers = {"Content-Type": "application/json"}
-        request_body = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
-        attempts.append((url, headers, request_body))
-    else:
-        # Gemini v1 production endpoint with Bearer token
-        host = "gemini.googleapis.com"
-        version = "v1"
-        model_name = "gemini-1.5-pro"
-        url = f"https://{host}/{version}/models/{model_name}:generate"
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}
-        request_body = {
-            "prompt": {"messages": [{"author": "user", "content": [{"type": "text", "text": message_text}]}]},
-            "temperature": 0.7,
-            "max_output_tokens": 512,
-        }
-        attempts.append((url, headers, request_body))
+    host = "gemini.googleapis.com"
+    version = "v1"
+    model_name = "gemini-1.5-pro"
+    request_body = {
+        "prompt": {"messages": [{"author": "user", "content": [{"type": "text", "text": message_text}]}]},
+        "temperature": 0.7,
+        "max_output_tokens": 512,
+    }
+
+    # 1) Bearer token attempt for Gemini v1
+    attempts.append(
+        (
+            f"https://{host}/{version}/models/{model_name}:generate",
+            {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"},
+            request_body,
+        )
+    )
+
+    if isinstance(GEMINI_API_KEY, str) and GEMINI_API_KEY.strip():
+        # 2) API key attempt on Gemini v1 endpoint
+        attempts.append(
+            (
+                f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}",
+                {"Content-Type": "application/json"},
+                request_body,
+            )
+        )
+
+        # 3) API key attempt on older Generative Language endpoint
+        legacy_host = "generativelanguage.googleapis.com"
+        legacy_version = "v1beta2"
+        legacy_model = "text-bison-001"
+        legacy_body = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
+        attempts.append(
+            (
+                f"https://{legacy_host}/{legacy_version}/models/{legacy_model}:generate?key={GEMINI_API_KEY}",
+                {"Content-Type": "application/json"},
+                legacy_body,
+            )
+        )
+    }
 
     def _parse_payload(payload: dict[str, Any]) -> str | None:
         candidates: list[Any] = payload.get("candidates") or []
