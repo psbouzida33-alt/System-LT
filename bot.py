@@ -134,6 +134,19 @@ def _gemini_reply(message_text: str) -> str | None:
                 legacy_body,
             )
         )
+
+        # 4) API key attempt using the newer Gemini Flash endpoint with X-goog-api-key
+        flash_host = "generativelanguage.googleapis.com"
+        flash_version = "v1beta"
+        flash_model = "gemini-flash-latest"
+        flash_body = {"contents": [{"parts": [{"text": message_text}]}]}
+        attempts.append(
+            (
+                f"https://{flash_host}/{flash_version}/models/{flash_model}:generateContent",
+                {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY},
+                flash_body,
+            )
+        )
     }
 
     def _parse_payload(payload: dict[str, Any]) -> str | None:
