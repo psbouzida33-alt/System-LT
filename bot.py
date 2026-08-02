@@ -654,9 +654,8 @@ async def chat_cmd(ctx: commands.Context[StatsBot], *, prompt: str):
         await ctx.send("AI is not configured on this bot.", delete_after=10)
         return
 
-    if ctx.channel is not None:
-        await ctx.channel.trigger_typing()
-    reply = await asyncio.to_thread(_gemini_reply, prompt)
+    async with ctx.typing():
+        reply = await asyncio.to_thread(_gemini_reply, prompt)
     if reply:
         await ctx.send(reply)
     else:
