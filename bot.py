@@ -726,6 +726,7 @@ def _gemini_diag_request(message_text: str) -> dict[str, object]:
         result["reason"] = "no_api_key"
         return result
 
+    attempts: list[tuple[str, dict[str, str], dict[str, Any]]] = []
     host = "gemini.googleapis.com"
     version = "v1"
     model_name = "gemini-1.5-pro"
@@ -735,36 +736,55 @@ def _gemini_diag_request(message_text: str) -> dict[str, object]:
         "max_output_tokens": 512,
     }
 
-    url = f"https://{host}/{version}/models/{model_name}:generate"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}
-    result["url"] = _redact_url(url)
+    attempts.append(
+        (
+            f"https://{host}/{version}/models/{model_name}:generate",
+            {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"},
+            request_body,
+        )
+    )
+    attempts.append(
+        (
+            f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}",
+            {"Content-Type": "application/json"},
+            request_body,
+        )
+    )
 
-    try:
-        req = urllib.request.Request(url, data=json.dumps(request_body).encode("utf-8"), headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            payload = json.load(resp)
-            result["status"] = getattr(resp, "status", None)
-            result["keys"] = list(payload.keys()) if isinstance(payload, dict) else None
-            # Attempt to parse using existing parser logic
-            parsed = None
-            try:
-                parsed = (lambda p: (  # tiny inline reuse of parsing from _gemini_reply
-                    None
-                ))(payload)
-            except Exception:
-                parsed = None
-            result["parsed"] = parsed
-            result["body_snippet"] = json.dumps(payload)[:1000]
-            return result
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
-        result["status"] = exc.code
-        result["reason"] = str(exc.reason)
-        result["body_snippet"] = body[:1000]
-        return result
-    except Exception as exc:
-        result["reason"] = str(exc)
-        return result
+    legacy_host = "generativelanguage.googleapis.com"
+    legacy_version = "v1beta2"
+    legacy_model = "text-bison-001"
+    legacy_body = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
+    attempts.append(
+        (
+            f"https://{legacy_host}/{legacy_version}/models/{legacy_model}:generate?key={GEMINI_API_KEY}",
+            {"Content-Type": "application/json"},
+            legacy_body,
+        )
+    )
+
+    last_error: str | None = None
+    for url, headers, body in attempts:
+        result["url"] = _redact_url(url)
+        try:
+            req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                payload = json.load(resp)
+                result["status"] = getattr(resp, "status", None)
+                result["keys"] = list(payload.keys()) if isinstance(payload, dict) else None
+                result["body_snippet"] = json.dumps(payload)[:1000]
+                result["parsed"] = _extract_text_from_content(payload.get("candidates") or payload.get("output") or []) if isinstance(payload, dict) else None
+                return result
+        except urllib.error.HTTPError as exc:
+            body_text = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+            last_error = f"{exc.code} {getattr(exc, 'reason', '')}; body={body_text[:400]}"
+            continue
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+
+    result["reason"] = last_error or "unknown"
+    return result
 
 
 @bot.command(name="ai_diag")
