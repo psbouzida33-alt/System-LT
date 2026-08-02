@@ -627,6 +627,25 @@ async def restart_voice_lounge_cmd(ctx: commands.Context[StatsBot]):
 async def ping_cmd(ctx: commands.Context[StatsBot]):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
 
+@bot.command(name="chat")
+async def chat_cmd(ctx: commands.Context[StatsBot], *, prompt: str):
+    """Send a message to Gemini AI and reply with the answer."""
+    prompt = prompt.strip()
+    if not prompt:
+        await ctx.send("Please provide a message for the AI.", delete_after=10)
+        return
+
+    if not GEMINI_API_KEY:
+        await ctx.send("AI is not configured on this bot.", delete_after=10)
+        return
+
+    await ctx.trigger_typing()
+    reply = await asyncio.to_thread(_gemini_reply, prompt)
+    if reply:
+        await ctx.send(reply)
+    else:
+        await ctx.send("AI did not return a response. Please try again later.", delete_after=15)
+
 @bot.command(name="changename")
 @commands.guild_only()
 async def change_name_cmd(ctx: commands.Context[StatsBot], *, new_nick: str):

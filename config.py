@@ -14,7 +14,18 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # --- Server IDs & stats layout ---
 BOT_VOICE_CHANNEL_ID = 1518025649225470072
-AI_CHANNEL_ID = 1522666358997778472
+
+def _get_env_int(name: str, default: int | None = None) -> int | None:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return int(value.strip())
+    except ValueError:
+        print(f"Invalid integer value for {name}: {value!r}")
+        return default
+
+AI_CHANNEL_ID = _get_env_int("AI_CHANNEL_ID", 1522666358997778472)
 
 STATS_CATEGORY_NAME = "─── ❖ ── ⚙️ SYSTEM ZONE ⚙️ ── ❖ ───"
 
