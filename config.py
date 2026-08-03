@@ -13,7 +13,7 @@ TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # --- Server IDs & stats layout ---
-BOT_VOICE_CHANNEL_ID = 1518025649225470072
+BOT_VOICE_CHANNEL_ID = 1533639367590019183
 
 def _get_env_int(name: str, default: int | None = None) -> int | None:
     value = os.getenv(name)
