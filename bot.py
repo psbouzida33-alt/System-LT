@@ -167,29 +167,7 @@ def _gemini_reply(message_text: str) -> str | None:
     )
 
     if GEMINI_API_KEY:
-        # 2) API key attempt on Gemini v1 endpoint
-        attempts.append(
-            (
-                f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}",
-                {"Content-Type": "application/json"},
-                request_body,
-            )
-        )
-
-        # 3) API key attempt on older Generative Language endpoint
-        legacy_host = "generativelanguage.googleapis.com"
-        legacy_version = "v1beta2"
-        legacy_model = "text-bison-001"
-        legacy_body: dict[str, Any] = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
-        attempts.append(
-            (
-                f"https://{legacy_host}/{legacy_version}/models/{legacy_model}:generate?key={GEMINI_API_KEY}",
-                {"Content-Type": "application/json"},
-                legacy_body,
-            )
-        )
-
-        # 4) API key attempt using the newer Gemini Flash endpoint with X-goog-api-key
+        # 2) API key attempt using the newer Gemini Flash endpoint with X-goog-api-key
         flash_host = "generativelanguage.googleapis.com"
         flash_version = "v1beta"
         flash_model = "gemini-flash-latest"
@@ -199,6 +177,28 @@ def _gemini_reply(message_text: str) -> str | None:
                 f"https://{flash_host}/{flash_version}/models/{flash_model}:generateContent",
                 {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY},
                 flash_body,
+            )
+        )
+
+        # 3) API key attempt on Gemini v1 endpoint
+        attempts.append(
+            (
+                f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}",
+                {"Content-Type": "application/json"},
+                request_body,
+            )
+        )
+
+        # 4) API key attempt on older Generative Language endpoint
+        legacy_host = "generativelanguage.googleapis.com"
+        legacy_version = "v1beta2"
+        legacy_model = "text-bison-001"
+        legacy_body: dict[str, Any] = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
+        attempts.append(
+            (
+                f"https://{legacy_host}/{legacy_version}/models/{legacy_model}:generate?key={GEMINI_API_KEY}",
+                {"Content-Type": "application/json"},
+                legacy_body,
             )
         )
 
@@ -809,6 +809,18 @@ def _gemini_diag_request(message_text: str) -> dict[str, object]:
             request_body,
         )
     )
+    flash_host = "generativelanguage.googleapis.com"
+    flash_version = "v1beta"
+    flash_model = "gemini-flash-latest"
+    flash_body = {"contents": [{"parts": [{"text": message_text}]}]}
+    attempts.append(
+        (
+            f"https://{flash_host}/{flash_version}/models/{flash_model}:generateContent",
+            {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY},
+            flash_body,
+        )
+    )
+
     attempts.append(
         (
             f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}",
