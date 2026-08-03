@@ -20,14 +20,12 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from config import (
-    AI_CHANNEL_ID,
     BOT_VOICE_CHANNEL_ID,
     CLOCK_ROTATION_SECONDS,
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
     STATS_CATEGORY_NAME,
     TOKEN,
-    GEMINI_API_KEY,
     WORLD_CLOCKS,
     load_stats_config,
     save_stats_config,
@@ -99,6 +97,9 @@ def _extract_text_from_content(content_value: Any) -> str | None:
         text_value = content_value.get("text")
         if isinstance(text_value, str):
             return text_value.strip()
+        parts_value = content_value.get("parts")
+        if isinstance(parts_value, list):
+            return _extract_text_from_content(parts_value)
         return _extract_text_from_content(content_value.get("content"))
 
     if isinstance(content_value, str):
@@ -106,188 +107,6 @@ def _extract_text_from_content(content_value: Any) -> str | None:
 
     return None
 
-
-def _parse_response_payload(payload: Any) -> str | None:
-    if not isinstance(payload, dict):
-        return None
-
-    candidates = payload.get("candidates")
-    if isinstance(candidates, list) and candidates:
-        candidate = candidates[0]
-        if isinstance(candidate, dict):
-            content_value = candidate.get("content")
-            parsed = _extract_text_from_content(content_value)
-            if parsed:
-                return parsed
-            if isinstance(content_value, str):
-                return content_value.strip()
-            output_text = candidate.get("output") or candidate.get("text")
-            if isinstance(output_text, str):
-                return output_text.strip()
-        return None
-
-    output_value = payload.get("output")
-    if isinstance(output_value, dict):
-        parsed = _extract_text_from_content(output_value.get("text") or output_value.get("content"))
-        if parsed:
-            return parsed
-        text_value = output_value.get("text")
-        if isinstance(text_value, str):
-            return text_value.strip()
-    return None
-
-
-def _gemini_reply(message_text: str) -> str | None:
-    if not GEMINI_API_KEY:
-        print("Gemini API key is not configured.")
-        return None
-    # Build a list of request attempts to support both OAuth-style Gemini
-    # tokens and API keys. The service may accept:
-    #  1. gemini.googleapis.com/v1/models/gemini-1.5-pro:generate with Bearer auth
-    #  2. gemini.googleapis.com/v1/models/gemini-1.5-pro:generate?key=APIKEY
-    #  3. generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generate?key=APIKEY
-    attempts: list[tuple[str, dict[str, str], dict[str, Any]]] = []
-
-    host = "gemini.googleapis.com"
-    version = "v1"
-    model_name = "gemini-1.5-pro"
-    request_body: dict[str, Any] = {
-        "prompt": {"messages": [{"author": "user", "content": [{"type": "text", "text": message_text}]}]},
-        "temperature": 0.7,
-        "max_output_tokens": 512,
-    }
-
-    # 1) Bearer token attempt for Gemini v1
-    attempts.append(
-        (
-            f"https://{host}/{version}/models/{model_name}:generate",
-            {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"},
-            request_body,
-        )
-    )
-
-    if GEMINI_API_KEY:
-        # 2) API key attempt using the newer Gemini Flash endpoint with X-goog-api-key
-        flash_host = "generativelanguage.googleapis.com"
-        flash_version = "v1beta"
-        flash_model = "gemini-flash-latest"
-        flash_body: dict[str, Any] = {"contents": [{"parts": [{"text": message_text}]}]}
-        attempts.append(
-            (
-                f"https://{flash_host}/{flash_version}/models/{flash_model}:generateContent",
-                {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY},
-                flash_body,
-            )
-        )
-
-        # 3) API key attempt on Gemini v1 endpoint
-        attempts.append(
-            (
-                f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}",
-                {"Content-Type": "application/json"},
-                request_body,
-            )
-        )
-
-        # 4) API key attempt on older Generative Language endpoint
-        legacy_host = "generativelanguage.googleapis.com"
-        legacy_version = "v1beta2"
-        legacy_model = "text-bison-001"
-        legacy_body: dict[str, Any] = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
-        attempts.append(
-            (
-                f"https://{legacy_host}/{legacy_version}/models/{legacy_model}:generate?key={GEMINI_API_KEY}",
-                {"Content-Type": "application/json"},
-                legacy_body,
-            )
-        )
-
-    def _parse_payload(payload: dict[str, Any]) -> str | None:
-        candidates: list[Any] = payload.get("candidates") or []
-        if candidates:
-            candidate: Any = candidates[0]
-            content_value: Any = candidate.get("content")
-            parsed = _extract_text_from_content(content_value)
-            if parsed:
-                return parsed
-            if isinstance(content_value, str):
-                return content_value.strip()
-            return str(candidate.get("output") or candidate.get("text") or "").strip()
-
-        output_value: Any = payload.get("output")
-        if isinstance(output_value, dict):
-            output_dict = cast(dict[str, Any], output_value)
-            parsed = _extract_text_from_content(output_dict.get("text") or output_dict.get("content"))
-            if parsed:
-                return parsed
-            text_value = output_dict.get("text")
-            if isinstance(text_value, str):
-                return text_value.strip()
-            return ""
-
-        return None
-
-    def _extract_text_from_content(content_value: Any) -> str | None:
-        if isinstance(content_value, list):
-            parts: list[str] = []
-            for raw_item in cast(list[object], content_value):
-                if isinstance(raw_item, dict):
-                    item_dict = cast(dict[str, Any], raw_item)
-                    text = _extract_text_from_content(item_dict.get("text") or item_dict.get("content"))
-                    if text:
-                        parts.append(text)
-                elif isinstance(raw_item, str):
-                    parts.append(raw_item)
-            return "".join(parts).strip() if parts else None
-
-        if isinstance(content_value, dict):
-            content_dict = cast(dict[str, Any], content_value)
-            text_value = content_dict.get("text")
-            if isinstance(text_value, str):
-                return text_value.strip()
-            return _extract_text_from_content(content_dict.get("content"))
-
-        if isinstance(content_value, str):
-            return content_value.strip()
-
-        return None
-
-    for url, headers, request_body in attempts:
-        request_data = json.dumps(request_body).encode("utf-8")
-        try:
-            print(f"Gemini request URL: {_redact_url(url)}")
-            print(f"Gemini request body: {json.dumps(request_body)[:1000]}")
-            request = urllib.request.Request(
-                url,
-                data=request_data,
-                headers=headers,
-                method="POST",
-            )
-            with urllib.request.urlopen(request, timeout=30) as response:
-                payload: dict[str, Any] = json.load(response)
-
-            print(f"Gemini response keys: {list(payload.keys())}")
-            parsed = _parse_payload(payload)
-            if parsed is None:
-                print(
-                    "Gemini response parsed no text. "
-                    f"Payload keys: {list(payload.keys())}; "
-                    f"payload snippet: {json.dumps(payload)[:1000]}"
-                )
-            return parsed
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
-            print(f"Gemini HTTP error: {exc.code} {getattr(exc, 'reason', '')}; url={_redact_url(url)}; body={body}")
-            # Try next attempt if available
-            continue
-        except urllib.error.URLError as exc:
-            print(f"Gemini URL error: {exc} (url={_redact_url(url)})")
-            continue
-        except Exception as exc:
-            print(f"Gemini request failed: {exc} (url={_redact_url(url)})")
-            continue
-
-    return None
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
@@ -486,56 +305,6 @@ async def _join_voice_lounge() -> None:
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
         return
-
-    if message.content.startswith("?"):
-        await bot.process_commands(message)
-        return
-
-    if bot.user is not None and bot.user in message.mentions:
-        if not GEMINI_API_KEY:
-            print("AI mention received but Gemini API key is not configured.")
-            await bot.process_commands(message)
-            return
-
-        prompt_text = re.sub(rf"<@!?(?:{bot.user.id})>", "", message.content).strip()
-        if not prompt_text:
-            await bot.process_commands(message)
-            return
-
-        print(f"AI mention received: {message.author} -> {message.channel.id}")
-        reply = await asyncio.to_thread(_gemini_reply, prompt_text)
-        if reply:
-            try:
-                await message.channel.send(reply)
-            except Exception as exc:
-                print(f"Failed to send Gemini reply: {exc}")
-        else:
-            print("Gemini replied with no content.")
-        return
-
-    if message.channel.id != AI_CHANNEL_ID:
-        await bot.process_commands(message)
-        return
-
-    if not GEMINI_API_KEY:
-        print("AI channel message received but Gemini API key is not configured.")
-        await bot.process_commands(message)
-        return
-
-    if not message.content.strip():
-        await bot.process_commands(message)
-        return
-
-    print(f"AI channel message received: {message.author} -> {message.channel.id}")
-    reply = await asyncio.to_thread(_gemini_reply, message.content)
-    if reply:
-        try:
-            await message.channel.send(reply)
-        except Exception as exc:
-            print(f"Failed to send Gemini reply: {exc}")
-    else:
-        print("Gemini replied with no content.")
-
     await bot.process_commands(message)
 
 
@@ -546,8 +315,6 @@ async def on_ready():
     print(f"Stats bot online as {bot.user} ({len(bot.guilds)} server(s))")
     if not _stats_config.get("stats_channel_id"):
         print("No stat channel configured yet. Run ?setupstats in your server.")
-    if not GEMINI_API_KEY:
-        print("Gemini API key is not configured. AI channel replies will be disabled.")
     if not update_stats_task.is_running():
         update_stats_task.start()
     await _join_voice_lounge()
@@ -753,145 +520,6 @@ async def restart_voice_lounge_cmd(ctx: commands.Context[StatsBot]):
 @bot.command(name="ping")
 async def ping_cmd(ctx: commands.Context[StatsBot]):
     await ctx.send(f"Pong — `{round(bot.latency * 1000)}ms`", delete_after=10)
-
-@bot.command(name="chat")
-async def chat_cmd(ctx: commands.Context[StatsBot], *, prompt: str):
-    """Send a message to Gemini AI and reply with the answer."""
-    prompt = prompt.strip()
-    if not prompt:
-        await ctx.send("Please provide a message for the AI.", delete_after=10)
-        return
-
-    if not GEMINI_API_KEY:
-        await ctx.send("AI is not configured on this bot.", delete_after=10)
-        return
-
-    async with ctx.typing():
-        reply = await asyncio.to_thread(_gemini_reply, prompt)
-    if reply:
-        await ctx.send(reply)
-    else:
-        await ctx.send("AI did not return a response. Please try again later.", delete_after=15)
-
-
-def _redact_url(url: str) -> str:
-    return re.sub(r"([?&]key=)[^&\s]+", r"\1[REDACTED]", url)
-
-
-def _gemini_diag_request(message_text: str) -> dict[str, object]:
-    result: dict[str, object] = {
-        "url": "",
-        "status": None,
-        "reason": "",
-        "keys": None,
-        "parsed": None,
-        "body_snippet": "",
-    }
-
-    if not GEMINI_API_KEY:
-        result["reason"] = "no_api_key"
-        return result
-
-    attempts: list[tuple[str, dict[str, str], dict[str, Any]]] = []
-    host = "gemini.googleapis.com"
-    version = "v1"
-    model_name = "gemini-1.5-pro"
-    request_body: dict[str, Any] = {
-        "prompt": {"messages": [{"author": "user", "content": [{"type": "text", "text": message_text}]}]},
-        "temperature": 0.7,
-        "max_output_tokens": 512,
-    }
-
-    attempts.append(
-        (
-            f"https://{host}/{version}/models/{model_name}:generate",
-            {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"},
-            request_body,
-        )
-    )
-    flash_host = "generativelanguage.googleapis.com"
-    flash_version = "v1beta"
-    flash_model = "gemini-flash-latest"
-    flash_body = {"contents": [{"parts": [{"text": message_text}]}]}
-    attempts.append(
-        (
-            f"https://{flash_host}/{flash_version}/models/{flash_model}:generateContent",
-            {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY},
-            flash_body,
-        )
-    )
-
-    attempts.append(
-        (
-            f"https://{host}/{version}/models/{model_name}:generate?key={GEMINI_API_KEY}",
-            {"Content-Type": "application/json"},
-            request_body,
-        )
-    )
-
-    legacy_host = "generativelanguage.googleapis.com"
-    legacy_version = "v1beta2"
-    legacy_model = "text-bison-001"
-    legacy_body = {"prompt": {"text": message_text}, "temperature": 0.7, "max_output_tokens": 512}
-    attempts.append(
-        (
-            f"https://{legacy_host}/{legacy_version}/models/{legacy_model}:generate?key={GEMINI_API_KEY}",
-            {"Content-Type": "application/json"},
-            legacy_body,
-        )
-    )
-
-    last_error: str | None = None
-    for url, headers, body in attempts:
-        result["url"] = _redact_url(url)
-        try:
-            req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                payload = json.load(resp)
-                result["status"] = getattr(resp, "status", None)
-                result["keys"] = list(payload.keys()) if isinstance(payload, dict) else None
-                result["body_snippet"] = json.dumps(payload)[:1000]
-                result["parsed"] = _parse_response_payload(payload)
-                return result
-        except urllib.error.HTTPError as exc:
-            body_text = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
-            last_error = f"{exc.code} {getattr(exc, 'reason', '')}; body={body_text[:400]}"
-            continue
-        except Exception as exc:
-            last_error = str(exc)
-            continue
-
-    result["reason"] = last_error or "unknown"
-    return result
-
-
-@bot.command(name="ai_diag")
-@commands.has_permissions(administrator=True)
-async def ai_diag_cmd(ctx: commands.Context[StatsBot], *, prompt: str = "hello"):
-    """Admin-only diagnostic: run a single Gemini request and report status (no secrets)."""
-    await ctx.send("Running AI diagnostic (admin-only)…", delete_after=5)
-    diag = await asyncio.to_thread(_gemini_diag_request, prompt)
-    lines: list[str] = []
-    lines.append(f"URL: {diag.get('url')}")
-    status = diag.get("status")
-    if status:
-        lines.append(f"Status: {status}")
-    reason = diag.get("reason")
-    if reason:
-        lines.append(f"Reason: {reason}")
-    keys = diag.get("keys")
-    if keys:
-        lines.append(f"Response keys: {keys}")
-    parsed = diag.get("parsed")
-    if parsed:
-        lines.append(f"Parsed text present: yes")
-    else:
-        lines.append(f"Parsed text present: no")
-    body = diag.get("body_snippet")
-    if isinstance(body, str):
-        lines.append(f"Body (truncated): {body[:400]}")
-
-    await ctx.send("\n".join(lines), delete_after=60)
 
 @bot.command(name="changename")
 @commands.guild_only()

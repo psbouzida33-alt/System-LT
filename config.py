@@ -10,7 +10,6 @@ load_dotenv()
 
 # --- Token only (secret — keep in .env locally or Render dashboard) ---
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # --- Server IDs & stats layout ---
 BOT_VOICE_CHANNEL_ID = 1533639367590019183
@@ -24,8 +23,6 @@ def _get_env_int(name: str, default: int | None = None) -> int | None:
     except ValueError:
         print(f"Invalid integer value for {name}: {value!r}")
         return default
-
-AI_CHANNEL_ID = _get_env_int("AI_CHANNEL_ID", 1522666358997778472)
 
 STATS_CATEGORY_NAME = "─── ❖ ── ⚙️ SYSTEM ZONE ⚙️ ── ❖ ───"
 
