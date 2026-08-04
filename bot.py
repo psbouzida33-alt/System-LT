@@ -482,8 +482,12 @@ async def on_command_error(ctx: commands.Context[StatsBot], error: commands.Comm
 @bot.command(name="sendnotverify")
 @commands.guild_only()
 @commands.check(_can_manage_bot)
-async def send_not_verify_cmd(ctx: commands.Context[StatsBot]):
-    """DM every member who currently has the configured not-verify role."""
+async def send_not_verify_cmd(ctx: commands.Context[StatsBot], *, custom_message: str | None = None):
+    """DM every member who currently has the configured not-verify role.
+
+    Usage: `?sendnotverify` to resend the default not-verify message,
+    or `?sendnotverify <message>` to send a custom DM to the role members.
+    """
     guild = ctx.guild
     if guild is None:
         await ctx.send("This command can only be used in a server.")
@@ -498,26 +502,40 @@ async def send_not_verify_cmd(ctx: commands.Context[StatsBot]):
         await ctx.send("The configured not-verify role was not found in this server.")
         return
 
+    if custom_message is None or not custom_message.strip():
+        custom_message = NOT_VERIFY_DM_MESSAGE.format(
+            member_name="{member_name}",
+            role_name=NOT_VERIFY_ROLE_NAME,
+            guild_name=guild.name,
+        )
+        use_template = True
+    else:
+        custom_message = custom_message.strip()
+        use_template = False
+
     sent = 0
     failed = 0
     for member in role.members:
         if member.bot:
             continue
         try:
-            await member.send(
-                NOT_VERIFY_DM_MESSAGE.format(
-                    member_name=member.display_name,
-                    role_name=NOT_VERIFY_ROLE_NAME,
-                    guild_name=guild.name,
+            if use_template:
+                await member.send(
+                    NOT_VERIFY_DM_MESSAGE.format(
+                        member_name=member.display_name,
+                        role_name=NOT_VERIFY_ROLE_NAME,
+                        guild_name=guild.name,
+                    )
                 )
-            )
+            else:
+                await member.send(custom_message)
             sent += 1
         except discord.Forbidden:
             failed += 1
         except discord.HTTPException:
             failed += 1
 
-    await ctx.send(f"Sent the custom message to {sent} members. Failed: {failed}.")
+    await ctx.send(f"Sent message to {sent} members. Failed: {failed}.")
 
 
 @bot.command(name="setupstats")
