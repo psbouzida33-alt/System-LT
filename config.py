@@ -11,8 +11,6 @@ load_dotenv()
 # --- Token only (secret — keep in .env locally or Render dashboard) ---
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
 
-# --- Server IDs & stats layout ---
-BOT_VOICE_CHANNEL_ID = 1533639367590019183
 
 def _get_env_int(name: str, default: int | None = None) -> int | None:
     value = os.getenv(name)
@@ -23,6 +21,17 @@ def _get_env_int(name: str, default: int | None = None) -> int | None:
     except ValueError:
         print(f"Invalid integer value for {name}: {value!r}")
         return default
+
+# --- Server IDs & stats layout ---
+BOT_VOICE_CHANNEL_ID = 1533639367590019183
+
+# --- Not-verify role notifications ---
+NOT_VERIFY_ROLE_ID = _get_env_int("NOT_VERIFY_ROLE_ID", 1517593118399139840)
+NOT_VERIFY_ROLE_NAME = os.getenv("NOT_VERIFY_ROLE_NAME", "not verify")
+NOT_VERIFY_DM_MESSAGE = os.getenv(
+    "NOT_VERIFY_DM_MESSAGE",
+    "مرحبا {member_name}، لديك الدور {role_name} في سيرفر {guild_name}. الرجاء مراجعة الشروط والضغط على زر التحقق أو التحدث مع الإدارة."
+)
 
 STATS_CATEGORY_NAME = "─── ❖ ── ⚙️ SYSTEM ZONE ⚙️ ── ❖ ───"
 

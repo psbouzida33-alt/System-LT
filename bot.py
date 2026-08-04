@@ -3,13 +3,9 @@ Legends Tunisia — Server Stats Bot
 Updates locked voice channels: member count + live clock.
 """
 import asyncio
-import json
 import os
-import re
 import threading
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, cast
@@ -27,6 +23,9 @@ from config import (
     STATS_CATEGORY_NAME,
     TOKEN,
     WORLD_CLOCKS,
+    NOT_VERIFY_DM_MESSAGE,
+    NOT_VERIFY_ROLE_ID,
+    NOT_VERIFY_ROLE_NAME,
     load_stats_config,
     save_stats_config,
     load_nick_config,
@@ -63,6 +62,20 @@ _last_stats_status: str | None = None
 _stats_config: dict[str, int | None] = load_stats_config()
 _nick_config: dict[str, int | None] = load_nick_config()
 
+ADMIN_USER_IDS = {1511828976732209252}
+STAFF_USER_IDS = {1517586424306598140}
+
+
+def _can_manage_bot(ctx: commands.Context[StatsBot]) -> bool:
+    if ctx.guild is None:
+        return False
+    author = ctx.author
+    if isinstance(author, discord.Member):
+        if author.guild_permissions.manage_guild or author.guild_permissions.manage_roles:
+            return True
+        return author.id in ADMIN_USER_IDS or author.id in STAFF_USER_IDS
+    return False
+
 
 def _guild_member_count(guild: discord.Guild) -> int:
     if MEMBER_COUNT_EXCLUDE_BOTS:
@@ -84,9 +97,11 @@ def _stats_channel_status() -> str:
 def _extract_text_from_content(content_value: Any) -> str | None:
     if isinstance(content_value, list):
         parts: list[str] = []
-        for raw_item in content_value:
+        for raw_item in cast(list[Any], content_value):
             if isinstance(raw_item, dict):
-                text = _extract_text_from_content(raw_item.get("text") or raw_item.get("content"))
+                raw_dict = cast(dict[str, Any], raw_item)
+                text_item = raw_dict.get("text") or raw_dict.get("content")
+                text = _extract_text_from_content(text_item)
                 if text:
                     parts.append(text)
             elif isinstance(raw_item, str):
@@ -94,13 +109,15 @@ def _extract_text_from_content(content_value: Any) -> str | None:
         return "".join(parts).strip() if parts else None
 
     if isinstance(content_value, dict):
-        text_value = content_value.get("text")
+        content_dict = cast(dict[str, Any], content_value)
+        text_value = content_dict.get("text")
         if isinstance(text_value, str):
             return text_value.strip()
-        parts_value = content_value.get("parts")
+        parts_value = content_dict.get("parts")
         if isinstance(parts_value, list):
             return _extract_text_from_content(parts_value)
-        return _extract_text_from_content(content_value.get("content"))
+        content_item = content_dict.get("content")
+        return _extract_text_from_content(content_item)
 
     if isinstance(content_value, str):
         return content_value.strip()
@@ -301,6 +318,28 @@ async def _join_voice_lounge() -> None:
         print(f"Failed to join voice lounge: {exc}")
 
 
+async def _send_not_verify_dm(member: discord.Member) -> None:
+    if member.bot or NOT_VERIFY_ROLE_ID is None:
+        return
+    if not any(role.id == NOT_VERIFY_ROLE_ID for role in member.roles):
+        return
+
+    try:
+        message = NOT_VERIFY_DM_MESSAGE.format(
+            member_name=member.display_name,
+            role_name=NOT_VERIFY_ROLE_NAME,
+            guild_name=member.guild.name,
+        )
+        await member.send(message)
+        print(f"[not-verify] DM sent to {member} ({member.id})")
+    except discord.Forbidden:
+        print(f"[not-verify] Could not DM {member} ({member.id}) because DMs are closed")
+    except discord.HTTPException as exc:
+        print(f"[not-verify] Failed to DM {member} ({member.id}): {exc}")
+    except Exception as exc:
+        print(f"[not-verify] Unexpected DM error for {member} ({member.id}): {exc}")
+
+
 @bot.event
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
@@ -390,6 +429,18 @@ async def on_member_join(member: discord.Member):
     if member.guild.id != _stats_config.get("guild_id"):
         return
     await update_stats_channel(member.guild)
+    await _send_not_verify_dm(member)
+
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    if before.guild.id != _stats_config.get("guild_id"):
+        return
+
+    had_role = any(role.id == NOT_VERIFY_ROLE_ID for role in before.roles)
+    has_role = any(role.id == NOT_VERIFY_ROLE_ID for role in after.roles)
+    if not had_role and has_role:
+        await _send_not_verify_dm(after)
 
 
 @bot.event
@@ -428,9 +479,50 @@ async def on_command_error(ctx: commands.Context[StatsBot], error: commands.Comm
     await ctx.send(f"Command failed: {error}")
 
 
+@bot.command(name="sendnotverify")
+@commands.guild_only()
+@commands.check(_can_manage_bot)
+async def send_not_verify_cmd(ctx: commands.Context[StatsBot]):
+    """DM every member who currently has the configured not-verify role."""
+    guild = ctx.guild
+    if guild is None:
+        await ctx.send("This command can only be used in a server.")
+        return
+
+    if NOT_VERIFY_ROLE_ID is None:
+        await ctx.send("No not-verify role ID is configured.")
+        return
+
+    role = guild.get_role(NOT_VERIFY_ROLE_ID)
+    if role is None:
+        await ctx.send("The configured not-verify role was not found in this server.")
+        return
+
+    sent = 0
+    failed = 0
+    for member in role.members:
+        if member.bot:
+            continue
+        try:
+            await member.send(
+                NOT_VERIFY_DM_MESSAGE.format(
+                    member_name=member.display_name,
+                    role_name=NOT_VERIFY_ROLE_NAME,
+                    guild_name=guild.name,
+                )
+            )
+            sent += 1
+        except discord.Forbidden:
+            failed += 1
+        except discord.HTTPException:
+            failed += 1
+
+    await ctx.send(f"Sent the custom message to {sent} members. Failed: {failed}.")
+
+
 @bot.command(name="setupstats")
 @commands.guild_only()
-@commands.has_permissions(manage_guild=True)
+@commands.check(_can_manage_bot)
 async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
     """Create one stats voice channel: name = members, status = world clock."""
     guild = ctx.guild
@@ -496,7 +588,7 @@ async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
 
 
 @bot.command(name="refreshstats")
-@commands.has_permissions(manage_guild=True)
+@commands.check(_can_manage_bot)
 async def refresh_stats_cmd(ctx: commands.Context[StatsBot]):
     """Force-refresh the stats channel."""
     await refresh_all_stats(force_members=True)
@@ -505,7 +597,7 @@ async def refresh_stats_cmd(ctx: commands.Context[StatsBot]):
 
 @bot.command(name="restartvoicelounge")
 @commands.guild_only()
-@commands.has_permissions(manage_guild=True)
+@commands.check(_can_manage_bot)
 async def restart_voice_lounge_cmd(ctx: commands.Context[StatsBot]):
     """Restart the bot's voice connection in the lounge channel."""
     guild = ctx.guild
