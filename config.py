@@ -30,7 +30,7 @@ NOT_VERIFY_ROLE_ID = _get_env_int("NOT_VERIFY_ROLE_ID", 1517593118399139840)
 NOT_VERIFY_ROLE_NAME = os.getenv("NOT_VERIFY_ROLE_NAME", "not verify")
 NOT_VERIFY_DM_MESSAGE = os.getenv(
     "NOT_VERIFY_DM_MESSAGE",
-    "مرحبا {member_name}، لديك الدور {role_name} في سيرفر {guild_name}. الرجاء مراجعة الشروط والضغط على زر التحقق أو التحدث مع الإدارة."
+    "Hello {member_name}, you currently have the {role_name} role in {guild_name}. Please review the rules and press the verify button or contact the staff. Don't forget to visit https://discord.com/channels/1511674199914320082/1517597478378143937"
 )
 
 STATS_CATEGORY_NAME = "─── ❖ ── ⚙️ SYSTEM ZONE ⚙️ ── ❖ ───"
