@@ -729,9 +729,16 @@ class StaffApplicationReviewView(discord.ui.View):
             if guild is not None:
                 member = guild.get_member(self.applicant_id)
                 if member is not None:
-                    await member.send(
-                        f"Your staff application has been {status.lower()} by {interaction.user.mention}."
-                    )
+                    if status == "Accepted":
+                        await member.send(
+                            "Congratulations! You have been accepted to join our Staff team. "
+                            "Please head over to the Support channel so we can talk more about the details and get you set up."
+                        )
+                    else:
+                        await member.send(
+                            "We're sorry, but your application has not been accepted at this time. "
+                            "Don't be discouraged, and feel free to try again later!"
+                        )
         except Exception:
             pass
 
