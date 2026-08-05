@@ -643,7 +643,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
         max_length=2000,
     )
     q5 = discord.ui.TextInput(
-        label="kan najm 3aref b rohek fi fa9ra sghira : ⭐",
+        label="kan najm 3aref b rohek fi fa9ra sghira :",
         style=discord.TextStyle.long,
         required=True,
         placeholder="A short personal message or summary",
