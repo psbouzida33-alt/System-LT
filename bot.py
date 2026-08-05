@@ -8,12 +8,8 @@ import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
-<<<<<<< HEAD
-from typing import Any, cast
-=======
 from pathlib import Path
-from typing import cast
->>>>>>> c68f502 (Add staff application modal panel and image embed support)
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import discord
@@ -257,12 +253,12 @@ async def refresh_all_stats(*, force_members: bool = False) -> None:
     await update_stats_channel(guild, force_members=force_members)
 
 
-<<<<<<< HEAD
-=======
 class DummyVoiceClient(discord.VoiceProtocol):
     """Join voice without audio — keeps the bot visible in the lounge channel."""
 
-    def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
+    channel: discord.abc.Connectable
+
+    def __init__(self, client, channel: discord.abc.Connectable):
         self.client = client
         self.channel = channel
         self._connected = False
@@ -275,33 +271,29 @@ class DummyVoiceClient(discord.VoiceProtocol):
         self_deaf: bool = True,
         self_mute: bool = True,
     ) -> None:
-        del timeout, reconnect, self_deaf, self_mute
         # discord.py passes self_deaf=False by default — always join deafened + muted.
-        voice_channel = cast(discord.VoiceChannel, self.channel)
-        await voice_channel.guild.change_voice_state(
-            channel=voice_channel,
+        channel = cast(discord.abc.GuildChannel, self.channel)
+        await channel.guild.change_voice_state(
+            channel=channel,
             self_deaf=True,
             self_mute=True,
         )
         self._connected = True
 
     async def disconnect(self, *, force: bool = False) -> None:
-        del force
-        voice_channel = cast(discord.VoiceChannel, self.channel)
-        await voice_channel.guild.change_voice_state(channel=None)
+        channel = cast(discord.abc.GuildChannel, self.channel)
+        await channel.guild.change_voice_state(channel=None)
         self._connected = False
         try:
-            key_id, _ = voice_channel._get_voice_client_key()
+            key_id, _ = self.channel._get_voice_client_key()
             self.client._connection._remove_voice_client(key_id)
         except Exception:
             pass
 
     async def on_voice_state_update(self, data):
-        del data
         pass
 
     async def on_voice_server_update(self, data):
-        del data
         pass
 
     def is_connected(self):
@@ -314,7 +306,6 @@ class DummyVoiceClient(discord.VoiceProtocol):
         pass
 
 
->>>>>>> c68f502 (Add staff application modal panel and image embed support)
 def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
     channel = bot.get_channel(BOT_VOICE_CHANNEL_ID)
     if isinstance(channel, discord.VoiceChannel):
@@ -326,47 +317,22 @@ def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
     return None
 
 
-<<<<<<< HEAD
-def _get_guild_voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
-    for client in bot.voice_clients:
-        if isinstance(client, discord.VoiceClient) and client.guild.id == guild.id:
-            return client
-    return None
+async def _ensure_voice_deafened(guild: discord.Guild, channel: discord.abc.GuildChannel) -> None:
+    await guild.change_voice_state(channel=channel, self_deaf=True, self_mute=True)
+
+
+async def _ensure_voice_unmuted(guild: discord.Guild, channel: discord.abc.GuildChannel) -> None:
+    await guild.change_voice_state(channel=channel, self_deaf=False, self_mute=False)
 
 
 async def _disconnect_guild_voice_client(guild: discord.Guild) -> None:
-    client = _get_guild_voice_client(guild)
-    if client is None:
-        return
-    try:
-        await client.disconnect(force=True)
-    except Exception as exc:
-        print(f"Failed to disconnect voice client: {exc}")
-
-
-async def _restore_lounge_voice(guild: discord.Guild) -> None:
-    voice_channel = _find_voice_lounge_channel()
-    if voice_channel is None or voice_channel.guild.id != guild.id:
-        return
-    await _disconnect_guild_voice_client(guild)
-    await _join_voice_lounge()
-
-
-
-
-async def _ensure_voice_unmuted(guild: discord.Guild, channel: discord.VoiceChannel | discord.StageChannel) -> None:
-    await guild.change_voice_state(channel=channel, self_deaf=False, self_mute=False)
-=======
-async def _ensure_voice_deafened(
-    guild: discord.Guild,
-    channel: discord.abc.Connectable,
-) -> None:
-    await guild.change_voice_state(
-        channel=cast(discord.abc.Snowflake, channel),
-        self_deaf=True,
-        self_mute=True,
-    )
->>>>>>> c68f502 (Add staff application modal panel and image embed support)
+    for voice_client in bot.voice_clients:
+        if getattr(voice_client, "guild", None) == guild:
+            try:
+                await voice_client.disconnect(force=True)
+            except Exception as exc:
+                print(f"Failed to disconnect voice client in {guild.id}: {exc}")
+            return
 
 
 async def _join_voice_lounge() -> None:
@@ -376,17 +342,9 @@ async def _join_voice_lounge() -> None:
         return
 
     member = voice_channel.guild.me
-<<<<<<< HEAD
     if member and member.voice and member.voice.channel:
         if member.voice.channel.id == BOT_VOICE_CHANNEL_ID:
-            if member.voice.self_deaf or member.voice.self_mute:
-=======
-    voice_state = member.voice if member else None
-    if voice_state is not None:
-        current_channel = voice_state.channel
-        if current_channel is not None and current_channel.id == BOT_VOICE_CHANNEL_ID:
-            if not voice_state.self_deaf or not voice_state.self_mute:
->>>>>>> c68f502 (Add staff application modal panel and image embed support)
+            if not member.voice.self_deaf or not member.voice.self_mute:
                 try:
                     await _ensure_voice_unmuted(voice_channel.guild, voice_channel)
                     print("Re-applied unmute/undeaf in voice lounge.")
@@ -482,58 +440,21 @@ async def on_voice_state_update(
     before: discord.VoiceState,
     after: discord.VoiceState,
 ):
-<<<<<<< HEAD
-    if bot.user is None:
+    if member is None or bot.user is None or member.id != bot.user.id:
         return
 
-    if member.id == bot.user.id:
-        if after.channel and after.channel.id == BOT_VOICE_CHANNEL_ID:
-            if after.self_deaf or after.self_mute:
-                await asyncio.sleep(0.5)
-                try:
-                    await _ensure_voice_unmuted(member.guild, after.channel)
-                except Exception as exc:
-                    print(f"Failed to enforce audio state in lounge: {exc}")
-            return
-
-        if before.channel and before.channel.id == BOT_VOICE_CHANNEL_ID:
-            if after.channel is None or after.channel.id != BOT_VOICE_CHANNEL_ID:
-                await asyncio.sleep(2)
-                await _join_voice_lounge()
+    if after.channel and after.channel.id == BOT_VOICE_CHANNEL_ID:
+        if not after.self_deaf or not after.self_mute:
+            await asyncio.sleep(0.5)
+            try:
+                await _ensure_voice_deafened(member.guild, after.channel)
+            except Exception as exc:
+                print(f"Failed to enforce deafen in lounge: {exc}")
         return
 
     if before.channel and before.channel.id == BOT_VOICE_CHANNEL_ID:
-        channel = member.guild.get_channel(before.channel.id)
-        if isinstance(channel, discord.VoiceChannel):
-            human_members = [m for m in channel.members if not m.bot]
-            if not human_members:
-                await _restore_lounge_voice(member.guild)
-=======
-    if member is None:
-        return
-    bot_user = bot.user
-    if bot_user is None or member.id != bot_user.id:
-        return
-
-    after_channel = after.channel
-    if after_channel is not None:
-        after_channel_id = after_channel.id
-        if after_channel_id == BOT_VOICE_CHANNEL_ID:
-            if not after.self_deaf or not after.self_mute:
-                await asyncio.sleep(0.5)
-                try:
-                    await _ensure_voice_deafened(member.guild, cast(discord.abc.Connectable, after_channel))
-                except Exception as exc:
-                    print(f"Failed to enforce deafen in lounge: {exc}")
-            return
-
-    before_channel = before.channel
-    if before_channel is not None:
-        before_channel_id = before_channel.id
-        if before_channel_id == BOT_VOICE_CHANNEL_ID:
-            await asyncio.sleep(2)
-            await _join_voice_lounge()
->>>>>>> c68f502 (Add staff application modal panel and image embed support)
+        await asyncio.sleep(2)
+        await _join_voice_lounge()
 
 
 @bot.event
@@ -656,15 +577,7 @@ async def send_not_verify_cmd(ctx: commands.Context[StatsBot], *, custom_message
 async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
     """Create one stats voice channel: name = members, status = world clock."""
     guild = ctx.guild
-    if guild is None:
-<<<<<<< HEAD
-        await ctx.send("This command can only be used in a server.")
-        return
-=======
-        await ctx.send("This command must be used in a server.")
-        return
-
->>>>>>> c68f502 (Add staff application modal panel and image embed support)
+    assert guild is not None
     overwrites = _stat_channel_overwrites(guild)
     count = _guild_member_count(guild)
 
@@ -839,7 +752,7 @@ async def setup_staff_app_cmd(ctx: commands.Context):
 
     embed.add_field(
         name="Staff app channel",
-        value=f"<#{STAFF_APP_CHANNEL_ID}",
+        value=f"<#{STAFF_APP_CHANNEL_ID}>",
         inline=False,
     )
     embed.set_footer(text="Anyone can request a staff application.")
@@ -1159,14 +1072,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self._send_ok()
 
-<<<<<<< HEAD
-    def log_message(self, format: str, *args: Any) -> None:
-        del format, args
-=======
     def log_message(self, format, *args):
-        del format, args
         pass
->>>>>>> c68f502 (Add staff application modal panel and image embed support)
 
 
 def _start_health_server() -> None:
