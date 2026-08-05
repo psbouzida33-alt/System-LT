@@ -683,11 +683,77 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
         embed.add_field(name=self.q4.label, value=self.q4.value, inline=False)
         embed.add_field(name=self.q5.label, value=self.q5.value, inline=False)
 
-        await staff_channel.send(embed=embed)
+        review_view = StaffApplicationReviewView(
+            applicant_id=interaction.user.id,
+            applicant_name=str(interaction.user),
+            applicant_mention=interaction.user.mention,
+        )
+        await staff_channel.send(embed=embed, view=review_view)
         await interaction.response.send_message(
             "Thank you — your staff application has been submitted.",
             ephemeral=True,
         )
+
+
+class StaffApplicationReviewView(discord.ui.View):
+    def __init__(self, applicant_id: int, applicant_name: str, applicant_mention: str):
+        super().__init__(timeout=None)
+        self.applicant_id = applicant_id
+        self.applicant_name = applicant_name
+        self.applicant_mention = applicant_mention
+
+    async def _is_authorized(self, member: discord.Member | discord.User) -> bool:
+        if not isinstance(member, discord.Member):
+            return False
+        return (
+            member.guild_permissions.manage_guild
+            or member.guild_permissions.manage_roles
+            or member.guild_permissions.manage_channels
+            or member.guild_permissions.manage_messages
+        )
+
+    async def _finish_review(self, interaction: discord.Interaction, status: str) -> None:
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+
+        if interaction.message is not None and interaction.message.embeds:
+            embed = discord.Embed.from_dict(interaction.message.embeds[0].to_dict())
+            embed.add_field(name="Decision", value=f"{status} by {interaction.user.mention}", inline=False)
+            await interaction.message.edit(embed=embed, view=self)
+        else:
+            await interaction.message.edit(view=self)
+
+        try:
+            guild = interaction.guild
+            if guild is not None:
+                member = guild.get_member(self.applicant_id)
+                if member is not None:
+                    await member.send(
+                        f"Your staff application has been {status.lower()} by {interaction.user.mention}."
+                    )
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success, custom_id="staff_app:accept")
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not await self._is_authorized(interaction.user):
+            await interaction.response.send_message("You are not allowed to accept staff applications.", ephemeral=True)
+            return
+
+        await self._finish_review(interaction, "Accepted")
+        await interaction.response.send_message("Staff application accepted.", ephemeral=True)
+
+    @discord.ui.button(label="Refuse", style=discord.ButtonStyle.danger, custom_id="staff_app:refuse")
+    async def refuse(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not await self._is_authorized(interaction.user):
+            await interaction.response.send_message("You are not allowed to refuse staff applications.", ephemeral=True)
+            return
+
+        await self._finish_review(interaction, "Refused")
+        await interaction.response.send_message("Staff application refused.", ephemeral=True)
 
 
 class StaffAppView(discord.ui.View):
