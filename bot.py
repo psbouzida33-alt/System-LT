@@ -757,7 +757,6 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
             await staff_channel.send(embed=embed, view=review_view)
         except Exception as exc:
             print(f"[staff apply] failed to send application to staff channel: {exc}")
-*** End Patch
 
 class StaffApplicationReviewView(discord.ui.View):
     def __init__(self, applicant_id: int, applicant_name: str, applicant_mention: str):
