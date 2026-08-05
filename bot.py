@@ -730,11 +730,11 @@ class StaffAppView(discord.ui.View):
 @bot.command(name="setupstaffapp")
 @commands.has_permissions(manage_guild=True)
 async def setup_staff_app_cmd(ctx: commands.Context):
-    """Create the staff application panel in the configured pick-a-staff channel."""
-    pick_channel = bot.get_channel(STAFF_PICK_CHANNEL_ID)
-    if not isinstance(pick_channel, discord.TextChannel):
+    """Create the staff application panel in the configured staff app channel."""
+    app_channel = bot.get_channel(STAFF_APP_CHANNEL_ID)
+    if not isinstance(app_channel, discord.TextChannel):
         await ctx.send(
-            "Could not find the configured staff pick channel."
+            "Could not find the configured staff application channel."
         )
         return
 
@@ -742,7 +742,7 @@ async def setup_staff_app_cmd(ctx: commands.Context):
         title="Staff Application Panel",
         description=(
             "Click the button below to submit a staff application request. "
-            "Staff will review the request in the configured staff app channel."
+            "Staff will review requests in this channel."
         ),
         color=discord.Color.green(),
     )
@@ -751,19 +751,19 @@ async def setup_staff_app_cmd(ctx: commands.Context):
         embed.set_image(url="attachment://staff_app_banner.png")
 
     embed.add_field(
-        name="Staff app channel",
-        value=f"<#{STAFF_APP_CHANNEL_ID}>",
+        name="Staff review channel",
+        value=app_channel.mention,
         inline=False,
     )
     embed.set_footer(text="Anyone can request a staff application.")
 
     view = StaffAppView(bot)
     if image_path.is_file():
-        await pick_channel.send(embed=embed, view=view, file=discord.File(image_path, filename="staff_app_banner.png"))
+        await app_channel.send(embed=embed, view=view, file=discord.File(image_path, filename="staff_app_banner.png"))
     else:
-        await pick_channel.send(embed=embed, view=view)
+        await app_channel.send(embed=embed, view=view)
     await ctx.send(
-        f"Staff application panel created in {pick_channel.mention}.",
+        f"Staff application panel created in {app_channel.mention}.",
         delete_after=10,
     )
 
