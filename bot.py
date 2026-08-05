@@ -8,7 +8,12 @@ import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+<<<<<<< HEAD
 from typing import Any, cast
+=======
+from pathlib import Path
+from typing import cast
+>>>>>>> c68f502 (Add staff application modal panel and image embed support)
 from zoneinfo import ZoneInfo
 
 import discord
@@ -20,6 +25,8 @@ from config import (
     CLOCK_ROTATION_SECONDS,
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
+    STAFF_APP_CHANNEL_ID,
+    STAFF_PICK_CHANNEL_ID,
     STATS_CATEGORY_NAME,
     TOKEN,
     WORLD_CLOCKS,
@@ -250,6 +257,64 @@ async def refresh_all_stats(*, force_members: bool = False) -> None:
     await update_stats_channel(guild, force_members=force_members)
 
 
+<<<<<<< HEAD
+=======
+class DummyVoiceClient(discord.VoiceProtocol):
+    """Join voice without audio — keeps the bot visible in the lounge channel."""
+
+    def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
+        self.client = client
+        self.channel = channel
+        self._connected = False
+
+    async def connect(
+        self,
+        *,
+        timeout: float,
+        reconnect: bool,
+        self_deaf: bool = True,
+        self_mute: bool = True,
+    ) -> None:
+        del timeout, reconnect, self_deaf, self_mute
+        # discord.py passes self_deaf=False by default — always join deafened + muted.
+        voice_channel = cast(discord.VoiceChannel, self.channel)
+        await voice_channel.guild.change_voice_state(
+            channel=voice_channel,
+            self_deaf=True,
+            self_mute=True,
+        )
+        self._connected = True
+
+    async def disconnect(self, *, force: bool = False) -> None:
+        del force
+        voice_channel = cast(discord.VoiceChannel, self.channel)
+        await voice_channel.guild.change_voice_state(channel=None)
+        self._connected = False
+        try:
+            key_id, _ = voice_channel._get_voice_client_key()
+            self.client._connection._remove_voice_client(key_id)
+        except Exception:
+            pass
+
+    async def on_voice_state_update(self, data):
+        del data
+        pass
+
+    async def on_voice_server_update(self, data):
+        del data
+        pass
+
+    def is_connected(self):
+        return self._connected
+
+    def is_playing(self):
+        return False
+
+    def stop(self):
+        pass
+
+
+>>>>>>> c68f502 (Add staff application modal panel and image embed support)
 def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
     channel = bot.get_channel(BOT_VOICE_CHANNEL_ID)
     if isinstance(channel, discord.VoiceChannel):
@@ -261,6 +326,7 @@ def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
     return None
 
 
+<<<<<<< HEAD
 def _get_guild_voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
     for client in bot.voice_clients:
         if isinstance(client, discord.VoiceClient) and client.guild.id == guild.id:
@@ -290,6 +356,17 @@ async def _restore_lounge_voice(guild: discord.Guild) -> None:
 
 async def _ensure_voice_unmuted(guild: discord.Guild, channel: discord.VoiceChannel | discord.StageChannel) -> None:
     await guild.change_voice_state(channel=channel, self_deaf=False, self_mute=False)
+=======
+async def _ensure_voice_deafened(
+    guild: discord.Guild,
+    channel: discord.abc.Connectable,
+) -> None:
+    await guild.change_voice_state(
+        channel=cast(discord.abc.Snowflake, channel),
+        self_deaf=True,
+        self_mute=True,
+    )
+>>>>>>> c68f502 (Add staff application modal panel and image embed support)
 
 
 async def _join_voice_lounge() -> None:
@@ -299,9 +376,17 @@ async def _join_voice_lounge() -> None:
         return
 
     member = voice_channel.guild.me
+<<<<<<< HEAD
     if member and member.voice and member.voice.channel:
         if member.voice.channel.id == BOT_VOICE_CHANNEL_ID:
             if member.voice.self_deaf or member.voice.self_mute:
+=======
+    voice_state = member.voice if member else None
+    if voice_state is not None:
+        current_channel = voice_state.channel
+        if current_channel is not None and current_channel.id == BOT_VOICE_CHANNEL_ID:
+            if not voice_state.self_deaf or not voice_state.self_mute:
+>>>>>>> c68f502 (Add staff application modal panel and image embed support)
                 try:
                     await _ensure_voice_unmuted(voice_channel.guild, voice_channel)
                     print("Re-applied unmute/undeaf in voice lounge.")
@@ -393,10 +478,11 @@ async def on_interaction(interaction: discord.Interaction) -> None:
 
 @bot.event
 async def on_voice_state_update(
-    member: discord.Member,
+    member: discord.Member | None,
     before: discord.VoiceState,
     after: discord.VoiceState,
 ):
+<<<<<<< HEAD
     if bot.user is None:
         return
 
@@ -422,6 +508,32 @@ async def on_voice_state_update(
             human_members = [m for m in channel.members if not m.bot]
             if not human_members:
                 await _restore_lounge_voice(member.guild)
+=======
+    if member is None:
+        return
+    bot_user = bot.user
+    if bot_user is None or member.id != bot_user.id:
+        return
+
+    after_channel = after.channel
+    if after_channel is not None:
+        after_channel_id = after_channel.id
+        if after_channel_id == BOT_VOICE_CHANNEL_ID:
+            if not after.self_deaf or not after.self_mute:
+                await asyncio.sleep(0.5)
+                try:
+                    await _ensure_voice_deafened(member.guild, cast(discord.abc.Connectable, after_channel))
+                except Exception as exc:
+                    print(f"Failed to enforce deafen in lounge: {exc}")
+            return
+
+    before_channel = before.channel
+    if before_channel is not None:
+        before_channel_id = before_channel.id
+        if before_channel_id == BOT_VOICE_CHANNEL_ID:
+            await asyncio.sleep(2)
+            await _join_voice_lounge()
+>>>>>>> c68f502 (Add staff application modal panel and image embed support)
 
 
 @bot.event
@@ -545,8 +657,14 @@ async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
     """Create one stats voice channel: name = members, status = world clock."""
     guild = ctx.guild
     if guild is None:
+<<<<<<< HEAD
         await ctx.send("This command can only be used in a server.")
         return
+=======
+        await ctx.send("This command must be used in a server.")
+        return
+
+>>>>>>> c68f502 (Add staff application modal panel and image embed support)
     overwrites = _stat_channel_overwrites(guild)
     count = _guild_member_count(guild)
 
@@ -603,6 +721,138 @@ async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
         )
     except Exception as exc:
         await status.edit(content=f"Setup failed: {exc}")
+
+
+class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
+    q1 = discord.ui.TextInput(
+        label="Tnajem tkoun daily active w supportive ?",
+        style=discord.TextStyle.long,
+        required=True,
+        placeholder="Write how you stay active and supportive",
+        max_length=2000,
+    )
+    q2 = discord.ui.TextInput(
+        label="Tzid afkar lel team mte3ek w behy fl teamwork ?",
+        style=discord.TextStyle.long,
+        required=True,
+        placeholder="Your ideas for the team and teamwork",
+        max_length=2000,
+    )
+    q3 = discord.ui.TextInput(
+        label="Ta9der tekhou 9rarat s3iba under pressure?",
+        style=discord.TextStyle.long,
+        required=True,
+        placeholder="Explain how you handle pressure",
+        max_length=2000,
+    )
+    q4 = discord.ui.TextInput(
+        label="Chnowa thés rohek tnajem tdhif lel community ?",
+        style=discord.TextStyle.long,
+        required=True,
+        placeholder="Describe how you would improve the community",
+        max_length=2000,
+    )
+    q5 = discord.ui.TextInput(
+        label="Zaref b rohek fi fa9ra sghira :",
+        style=discord.TextStyle.long,
+        required=True,
+        placeholder="A short personal message or summary",
+        max_length=2000,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        staff_channel = interaction.client.get_channel(STAFF_APP_CHANNEL_ID)
+        if not isinstance(staff_channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Staff application channel is not configured or could not be found.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title="New Staff Application",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(),
+        )
+        embed.add_field(
+            name="Applicant",
+            value=f"{interaction.user.mention} ({interaction.user.id})",
+            inline=False,
+        )
+        origin = "Unknown"
+        if isinstance(interaction.channel, discord.TextChannel):
+            origin = interaction.channel.mention
+        elif isinstance(interaction.channel, discord.VoiceChannel):
+            origin = interaction.channel.mention
+        elif isinstance(interaction.channel, discord.Thread):
+            origin = interaction.channel.mention
+        embed.add_field(name="Origin channel", value=origin, inline=False)
+        embed.add_field(name=self.q1.label, value=self.q1.value, inline=False)
+        embed.add_field(name=self.q2.label, value=self.q2.value, inline=False)
+        embed.add_field(name=self.q3.label, value=self.q3.value, inline=False)
+        embed.add_field(name=self.q4.label, value=self.q4.value, inline=False)
+        embed.add_field(name=self.q5.label, value=self.q5.value, inline=False)
+
+        await staff_channel.send(embed=embed)
+        await interaction.response.send_message(
+            "Thank you — your staff application has been submitted.",
+            ephemeral=True,
+        )
+
+
+class StaffAppView(discord.ui.View):
+    def __init__(self, bot: commands.Bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    @discord.ui.button(label="Apply", style=discord.ButtonStyle.primary, custom_id="staff_app.apply")
+    async def apply_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.send_modal(StaffApplicationModal())
+
+
+@bot.command(name="setupstaffapp")
+@commands.has_permissions(manage_guild=True)
+async def setup_staff_app_cmd(ctx: commands.Context):
+    """Create the staff application panel in the configured pick-a-staff channel."""
+    pick_channel = bot.get_channel(STAFF_PICK_CHANNEL_ID)
+    if not isinstance(pick_channel, discord.TextChannel):
+        await ctx.send(
+            "Could not find the configured staff pick channel."
+        )
+        return
+
+    embed = discord.Embed(
+        title="Staff Application Panel",
+        description=(
+            "Click the button below to submit a staff application request. "
+            "Staff will review the request in the configured staff app channel."
+        ),
+        color=discord.Color.green(),
+    )
+    image_path = Path("staff_app_banner.png")
+    if image_path.is_file():
+        embed.set_image(url="attachment://staff_app_banner.png")
+
+    embed.add_field(
+        name="Staff app channel",
+        value=f"<#{STAFF_APP_CHANNEL_ID}",
+        inline=False,
+    )
+    embed.set_footer(text="Anyone can request a staff application.")
+
+    view = StaffAppView(bot)
+    if image_path.is_file():
+        await pick_channel.send(embed=embed, view=view, file=discord.File(image_path, filename="staff_app_banner.png"))
+    else:
+        await pick_channel.send(embed=embed, view=view)
+    await ctx.send(
+        f"Staff application panel created in {pick_channel.mention}.",
+        delete_after=10,
+    )
 
 
 @bot.command(name="refreshstats")
@@ -909,8 +1159,14 @@ class _HealthHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self._send_ok()
 
+<<<<<<< HEAD
     def log_message(self, format: str, *args: Any) -> None:
         del format, args
+=======
+    def log_message(self, format, *args):
+        del format, args
+        pass
+>>>>>>> c68f502 (Add staff application modal panel and image embed support)
 
 
 def _start_health_server() -> None:

@@ -11,6 +11,13 @@ load_dotenv()
 # --- Token only (secret — keep in .env locally or Render dashboard) ---
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
 
+<<<<<<< HEAD
+=======
+# --- Server IDs & stats layout ---
+BOT_VOICE_CHANNEL_ID = 1518025649225470072
+STAFF_PICK_CHANNEL_ID = 1534586562447282258
+STAFF_APP_CHANNEL_ID = 1534583845884792874
+>>>>>>> c68f502 (Add staff application modal panel and image embed support)
 
 def _get_env_int(name: str, default: int | None = None) -> int | None:
     value = os.getenv(name)
