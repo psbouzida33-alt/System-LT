@@ -669,7 +669,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
         max_length=2000,
     )
     q2 = discord.ui.TextInput(
-        label="What ideas would you bring to the team and teamwork?",
+        label="What ideas would you bring to the team?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Your ideas for the team and teamwork",
@@ -683,7 +683,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
         max_length=2000,
     )
     q4 = discord.ui.TextInput(
-        label="How would you improve or contribute to the community?",
+        label="How would you improve the community?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Describe how you would improve the community",
