@@ -434,29 +434,6 @@ async def on_interaction(interaction: discord.Interaction) -> None:
                 pass
         return
 
-    if custom_id == "staff_app.apply":
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "This button can only be used inside a server.",
-                ephemeral=True,
-            )
-            return
-
-        print(f"[staff apply] raw button interaction received by {interaction.user} ({interaction.user.id})")
-        modal = StaffApplicationModal()
-        try:
-            await interaction.response.send_modal(modal)
-        except Exception as exc:
-            print(f"[staff apply] failed to open modal: {exc}")
-            try:
-                await interaction.response.send_message(
-                    "Unable to open the staff application form right now. Please try again.",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
-        return
-
 
 @bot.event
 async def on_voice_state_update(
