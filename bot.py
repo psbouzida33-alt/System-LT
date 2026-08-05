@@ -424,10 +424,13 @@ async def on_interaction(interaction: discord.Interaction) -> None:
         try:
             await interaction.response.send_modal(StaffApplicationModal())
         except Exception as exc:
+            import traceback
+
             print(f"[staff apply] failed to open modal: {exc}")
+            traceback.print_exc()
             try:
                 await interaction.response.send_message(
-                    "Unable to open the staff application form right now. Please try again.",
+                    f"Unable to open the staff application form right now. Error: {type(exc).__name__}",
                     ephemeral=True,
                 )
             except Exception:
