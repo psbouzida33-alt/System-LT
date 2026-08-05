@@ -669,7 +669,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
         max_length=2000,
     )
     q2 = discord.ui.TextInput(
-        label="Tzid afkar lel team mte3ek w behy fl teamwork ?",
+        label="Afkar mte3ek lel team w teamwork ?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Your ideas for the team and teamwork",
@@ -683,7 +683,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
         max_length=2000,
     )
     q4 = discord.ui.TextInput(
-        label="Chnowa thés rohek tnajem tdhif lel community ?",
+        label="Kifech tnajem tdhif lel community ?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Describe how you would improve the community",
@@ -769,7 +769,17 @@ async def setup_staff_app_cmd(ctx: commands.Context):
             "If you enjoy helping others, keeping the community safe, and contributing to a positive environment, "
             "this is your chance to apply."
         ),
-        color=discord.Color.purple(),
+        color=discord.Color.red(),
+    )
+
+    embed.add_field(
+        name="Why apply?",
+        value=(
+            "• Exclusive staff role\n"
+            "• Experience & teamwork\n"
+            "• Support the community"
+        ),
+        inline=False,
     )
 
     image_url = "https://i.imgur.com/WbOpn5L.jpeg"
