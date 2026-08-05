@@ -829,6 +829,65 @@ async def setup_staff_app_cmd(ctx: commands.Context):
     )
 
 
+@bot.command(name="poststaffpanels")
+@commands.has_permissions(manage_guild=True)
+async def post_staff_panels_cmd(ctx: commands.Context, member: discord.Member | None = None):
+    """Post two staff application panels to the requested channels.
+
+    Usage: `?poststaffpanels` to post with the command author as the applicant,
+    or `?poststaffpanels @member` to post as a specific member.
+    """
+    if member is None:
+        member = ctx.author if isinstance(ctx.author, discord.Member) else None
+
+    applicant_mention = member.mention if isinstance(member, discord.Member) else str(member or ctx.author)
+
+    # Channel IDs requested by the user:
+    channel_a_id = 1534583845884792874  # STAFF APPLICATION
+    channel_b_id = 1534586562447282258  # New Staff Application (review)
+
+    app_channel = bot.get_channel(channel_a_id)
+    review_channel = bot.get_channel(channel_b_id)
+
+    if isinstance(app_channel, discord.TextChannel):
+        embed = discord.Embed(
+            title="STAFF APPLICATION",
+            description=(
+                "We’re looking for active, respectful, and dedicated members to join our staff team. "
+                "If you enjoy helping others, keeping the community safe, and contributing to a positive environment, "
+                "this is your chance to apply."
+            ),
+            color=discord.Color.red(),
+        )
+        embed.add_field(name="Why apply?", value=("• Exclusive staff role\n" "• Experience & teamwork\n" "• Support the community"), inline=False)
+        embed.add_field(name="Applicant", value=applicant_mention, inline=False)
+        view = StaffAppView(bot)
+        try:
+            await app_channel.send(embed=embed, view=view)
+        except Exception as exc:
+            await ctx.send(f"Failed to send panel to channel A: {exc}")
+
+    if isinstance(review_channel, discord.TextChannel):
+        embed2 = discord.Embed(
+            title="New Staff Application",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(),
+        )
+        embed2.add_field(name="Applicant", value=applicant_mention, inline=False)
+        embed2.add_field(name="Origin channel", value=app_channel.mention if isinstance(app_channel, discord.TextChannel) else "Unknown", inline=False)
+        # include placeholder answers so staff see the fields
+        embed2.add_field(name="Q1", value="—", inline=False)
+        embed2.add_field(name="Q2", value="—", inline=False)
+        embed2.add_field(name="Q3", value="—", inline=False)
+        review_view = StaffApplicationReviewView(applicant_id=member.id if isinstance(member, discord.Member) else 0, applicant_name=str(member or ctx.author), applicant_mention=applicant_mention)
+        try:
+            await review_channel.send(embed=embed2, view=review_view)
+        except Exception as exc:
+            await ctx.send(f"Failed to send review panel to channel B: {exc}")
+
+    await ctx.send("Posted staff panels.", delete_after=8)
+
+
 @bot.command(name="refreshstats")
 @commands.check(_can_manage_bot)
 async def refresh_stats_cmd(ctx: commands.Context[StatsBot]):
