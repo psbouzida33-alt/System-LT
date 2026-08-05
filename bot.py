@@ -615,35 +615,35 @@ async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
 
 class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
     q1 = discord.ui.TextInput(
-        label="Tnajem tkoun daily active w supportive ?",
+        label="Can you be active daily and supportive?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Write how you stay active and supportive",
         max_length=2000,
     )
     q2 = discord.ui.TextInput(
-        label="tnajam tzid Afkar mte3ek lel team w teamwork ?",
+        label="What ideas would you bring to the team and teamwork?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Your ideas for the team and teamwork",
         max_length=2000,
     )
     q3 = discord.ui.TextInput(
-        label="Ta9der tekhou 9rarat s3iba under pressure?",
+        label="Can you make tough decisions under pressure?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Explain how you handle pressure",
         max_length=2000,
     )
     q4 = discord.ui.TextInput(
-        label="Kifech tnajem tdhif lel community ?",
+        label="How would you improve or contribute to the community?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Describe how you would improve the community",
         max_length=2000,
     )
     q5 = discord.ui.TextInput(
-        label="kan najm 3aref b rohek fi fa9ra sghira :",
+        label="A short introduction about yourself:",
         style=discord.TextStyle.long,
         required=True,
         placeholder="A short personal message or summary",
