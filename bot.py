@@ -622,21 +622,21 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
         max_length=2000,
     )
     q2 = discord.ui.TextInput(
-        label="tnajam tzid Afkar mte3ek lel team w teamwork ? ⭐",
+        label="tnajam tzid Afkar mte3ek lel team w teamwork ?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Your ideas for the team and teamwork",
         max_length=2000,
     )
     q3 = discord.ui.TextInput(
-        label="Ta9der tekhou 9rarat s3iba under pressure? ⭐",
+        label="Ta9der tekhou 9rarat s3iba under pressure?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Explain how you handle pressure",
         max_length=2000,
     )
     q4 = discord.ui.TextInput(
-        label="Kifech tnajem tdhif lel community ? ⭐",
+        label="Kifech tnajem tdhif lel community ?",
         style=discord.TextStyle.long,
         required=True,
         placeholder="Describe how you would improve the community",
