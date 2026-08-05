@@ -742,20 +742,10 @@ async def setup_staff_app_cmd(ctx: commands.Context):
     embed = discord.Embed(
         title="STAFF APPLICATION",
         description=(
-            "We’re looking for active, respectful, and dedicated members to join our staff team. "
-            "If you enjoy helping others, keeping the community safe, and contributing to a positive environment, "
-            "this is your chance to apply."
+            "Click the button below to open the staff application form. "
+            "Anyone can apply and the staff team will review your request."
         ),
-        color=discord.Color.red(),
-    )
-    embed.add_field(
-        name="Why apply?",
-        value=(
-            "• Exclusive staff role\n"
-            "• Experience & teamwork\n"
-            "• Support the community"
-        ),
-        inline=False,
+        color=discord.Color.blue(),
     )
 
     image_url = "https://i.imgur.com/WbOpn5L.jpeg"
@@ -765,7 +755,7 @@ async def setup_staff_app_cmd(ctx: commands.Context):
     else:
         embed.set_image(url=image_url)
 
-    embed.set_footer(text="Press Apply to send your staff application.")
+    embed.set_footer(text="Press Apply to submit your staff application.")
 
     view = StaffAppView(bot)
     if image_path.is_file():
