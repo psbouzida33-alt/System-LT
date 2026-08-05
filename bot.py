@@ -739,23 +739,34 @@ async def setup_staff_app_cmd(ctx: commands.Context):
         return
 
     embed = discord.Embed(
-        title="Staff Application Panel",
+        title="STAFF APPLICATION",
         description=(
-            "Click the button below to submit a staff application request. "
-            "Staff will review requests in this channel."
+            "We’re looking for active, respectful, and dedicated members to join our staff team. "
+            "If you enjoy helping others, keeping the community safe, and contributing to a positive environment, "
+            "this is your chance to apply."
         ),
-        color=discord.Color.green(),
+        color=discord.Color.red(),
     )
-    image_path = Path("staff_app_banner.png")
-    if image_path.is_file():
-        embed.set_image(url="attachment://staff_app_banner.png")
-
+    embed.add_field(
+        name="Why apply?",
+        value=(
+            "• Exclusive staff role\n"
+            "• Experience & teamwork\n"
+            "• Support the community"
+        ),
+        inline=False,
+    )
     embed.add_field(
         name="Staff review channel",
         value=app_channel.mention,
         inline=False,
     )
-    embed.set_footer(text="Anyone can request a staff application.")
+
+    image_path = Path("staff_app_banner.png")
+    if image_path.is_file():
+        embed.set_image(url="attachment://staff_app_banner.png")
+
+    embed.set_footer(text="Press Apply to send your staff application.")
 
     view = StaffAppView(bot)
     if image_path.is_file():
