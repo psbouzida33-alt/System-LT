@@ -434,6 +434,29 @@ async def on_interaction(interaction: discord.Interaction) -> None:
                 pass
         return
 
+    if custom_id == "staff_app.apply":
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This button can only be used inside a server.",
+                ephemeral=True,
+            )
+            return
+
+        print(f"[staff apply] raw button interaction received by {interaction.user} ({interaction.user.id})")
+        modal = StaffApplicationModal()
+        try:
+            await interaction.response.send_modal(modal)
+        except Exception as exc:
+            print(f"[staff apply] raw on_interaction failed to open modal: {exc}")
+            try:
+                await interaction.response.send_message(
+                    "Unable to open the staff application form right now. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception as inner_exc:
+                print(f"[staff apply] raw fallback response failed: {inner_exc}")
+        return
+
 
 @bot.event
 async def on_voice_state_update(
@@ -742,10 +765,11 @@ async def setup_staff_app_cmd(ctx: commands.Context):
     embed = discord.Embed(
         title="STAFF APPLICATION",
         description=(
-            "Click the button below to open the staff application form. "
-            "Anyone can apply and the staff team will review your request."
+            "We’re looking for active, respectful, and dedicated members to join our staff team. "
+            "If you enjoy helping others, keeping the community safe, and contributing to a positive environment, "
+            "this is your chance to apply."
         ),
-        color=discord.Color.blue(),
+        color=discord.Color.purple(),
     )
 
     image_url = "https://i.imgur.com/WbOpn5L.jpeg"
@@ -755,7 +779,7 @@ async def setup_staff_app_cmd(ctx: commands.Context):
     else:
         embed.set_image(url=image_url)
 
-    embed.set_footer(text="Press Apply to submit your staff application.")
+    embed.set_footer(text="Press Apply to send your staff application.")
 
     view = StaffAppView(bot)
     if image_path.is_file():
