@@ -738,11 +738,11 @@ async def setup_staff_app_cmd(ctx: commands.Context):
     embed.set_footer(text="Press Apply to send your staff application.")
 
     view = StaffAppView(bot)
-    bot.add_view(view)
     if image_path.is_file():
-        await app_channel.send(embed=embed, view=view, file=discord.File(image_path, filename="staff_app_banner.png"))
+        message = await app_channel.send(embed=embed, view=view, file=discord.File(image_path, filename="staff_app_banner.png"))
     else:
-        await app_channel.send(embed=embed, view=view)
+        message = await app_channel.send(embed=embed, view=view)
+    bot.add_view(view, message_id=message.id)
     await ctx.send(
         f"Staff application panel created in {app_channel.mention}.",
         delete_after=10,
