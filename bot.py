@@ -962,12 +962,95 @@ class CommandsPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Show Command Help", style=discord.ButtonStyle.primary, custom_id="commands_panel:show")
-    async def show_commands(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _reply(self, interaction: discord.Interaction, text: str) -> None:
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @discord.ui.button(label="?sendnotverify", style=discord.ButtonStyle.primary, custom_id="commands_panel:sendnotverify", row=0)
+    async def sendnotverify_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        await interaction.response.send_message(
-            "This panel lists the bot commands available in this server. Use the embed fields for details.",
-            ephemeral=True,
+        await self._reply(
+            interaction,
+            "?sendnotverify [message] — DM every member with the configured not-verify role. Optional custom message is supported.",
+        )
+
+    @discord.ui.button(label="?setupstats", style=discord.ButtonStyle.secondary, custom_id="commands_panel:setupstats", row=0)
+    async def setupstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?setupstats — Create or configure the stats voice channel and clock category.",
+        )
+
+    @discord.ui.button(label="?setupstaffapp", style=discord.ButtonStyle.success, custom_id="commands_panel:setupstaffapp", row=0)
+    async def setupstaffapp_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?setupstaffapp — Post the staff application panel in the configured staff application channel.",
+        )
+
+    @discord.ui.button(label="?poststaffpanels", style=discord.ButtonStyle.danger, custom_id="commands_panel:poststaffpanels", row=0)
+    async def poststaffpanels_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?poststaffpanels [@member] — Post staff application panels to the two staff channels, optionally as a specific member.",
+        )
+
+    @discord.ui.button(label="?refreshstats", style=discord.ButtonStyle.primary, custom_id="commands_panel:refreshstats", row=0)
+    async def refreshstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?refreshstats — Force-refresh the stats voice channel name and clock status.",
+        )
+
+    @discord.ui.button(label="?restartvoicelounge", style=discord.ButtonStyle.secondary, custom_id="commands_panel:restartvoicelounge", row=1)
+    async def restartvoicelounge_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?restartvoicelounge — Restart the bot's voice connection in the configured lounge channel.",
+        )
+
+    @discord.ui.button(label="?ping", style=discord.ButtonStyle.success, custom_id="commands_panel:ping", row=1)
+    async def ping_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?ping — Check the bot's latency.",
+        )
+
+    @discord.ui.button(label="?changename", style=discord.ButtonStyle.danger, custom_id="commands_panel:changename", row=1)
+    async def changename_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?changename <new_nick> — Change your own nickname in the server.",
+        )
+
+    @discord.ui.button(label="?setupnick", style=discord.ButtonStyle.primary, custom_id="commands_panel:setupnick", row=1)
+    async def setupnick_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?setupnick [#admin-channel] — Post a nickname request panel in this channel, optionally set a review channel.",
+        )
+
+    @discord.ui.button(label="?setnickreview", style=discord.ButtonStyle.secondary, custom_id="commands_panel:setnickreview", row=2)
+    async def setnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?setnickreview #channel — Save a channel where nickname requests will be reviewed.",
+        )
+
+    @discord.ui.button(label="?getnickreview", style=discord.ButtonStyle.success, custom_id="commands_panel:getnickreview", row=2)
+    async def getnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._reply(
+            interaction,
+            "?getnickreview — Show the configured nickname review channel for this server.",
         )
 
 
@@ -980,64 +1063,17 @@ async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
         title="Bot Commands Panel",
         description=(
             "This panel shows the available bot commands and what they do. "
-            "Use the command prefix `?` or `!` before each command name."
+            "Click a button below to see more details about each command."
         ),
         color=discord.Color.gold(),
     )
 
     embed.add_field(
-        name="?sendnotverify [message]",
-        value="DM every member with the configured not-verify role. Provide an optional custom message.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?setupstats",
-        value="Create or configure the stats voice channel and clock category.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?setupstaffapp",
-        value="Post the staff application panel in the configured staff application channel.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?poststaffpanels [@member]",
-        value="Post staff application panels to the two staff channels, optionally as a specific member.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?refreshstats",
-        value="Force-refresh the stats voice channel name and clock status.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?restartvoicelounge",
-        value="Restart the bot's voice connection in the configured lounge channel.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?ping",
-        value="Check the bot's latency.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?changename <new_nick>",
-        value="Change your own nickname in the server.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?setupnick [#admin-channel]",
-        value="Post a nickname request panel in this channel, optionally set a review channel.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?setnickreview #channel",
-        value="Save a channel where nickname requests will be reviewed.",
-        inline=False,
-    )
-    embed.add_field(
-        name="?getnickreview",
-        value="Show the configured nickname review channel for this server.",
+        name="Commands Panel",
+        value=(
+            "Use the buttons below to view command help. "
+            "Each button displays a short explanation of what the command does."
+        ),
         inline=False,
     )
     embed.set_footer(text="Use ?setupcommandspanel to recreate this panel.")
