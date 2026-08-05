@@ -958,6 +958,94 @@ async def post_staff_panels_cmd(ctx: commands.Context, member: discord.Member | 
     await ctx.send("Posted staff panels.", delete_after=8)
 
 
+class CommandsPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Show Command Help", style=discord.ButtonStyle.primary, custom_id="commands_panel:show")
+    async def show_commands(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await interaction.response.send_message(
+            "This panel lists the bot commands available in this server. Use the embed fields for details.",
+            ephemeral=True,
+        )
+
+
+@bot.command(name="setupcommandspanel")
+@commands.guild_only()
+@commands.check(_can_manage_bot)
+async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
+    """Post a large commands panel in the current channel."""
+    embed = discord.Embed(
+        title="Bot Commands Panel",
+        description=(
+            "This panel shows the available bot commands and what they do. "
+            "Use the command prefix `?` or `!` before each command name."
+        ),
+        color=discord.Color.gold(),
+    )
+
+    embed.add_field(
+        name="?sendnotverify [message]",
+        value="DM every member with the configured not-verify role. Provide an optional custom message.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?setupstats",
+        value="Create or configure the stats voice channel and clock category.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?setupstaffapp",
+        value="Post the staff application panel in the configured staff application channel.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?poststaffpanels [@member]",
+        value="Post staff application panels to the two staff channels, optionally as a specific member.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?refreshstats",
+        value="Force-refresh the stats voice channel name and clock status.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?restartvoicelounge",
+        value="Restart the bot's voice connection in the configured lounge channel.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?ping",
+        value="Check the bot's latency.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?changename <new_nick>",
+        value="Change your own nickname in the server.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?setupnick [#admin-channel]",
+        value="Post a nickname request panel in this channel, optionally set a review channel.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?setnickreview #channel",
+        value="Save a channel where nickname requests will be reviewed.",
+        inline=False,
+    )
+    embed.add_field(
+        name="?getnickreview",
+        value="Show the configured nickname review channel for this server.",
+        inline=False,
+    )
+    embed.set_footer(text="Use ?setupcommandspanel to recreate this panel.")
+
+    view = CommandsPanelView()
+    await ctx.send(embed=embed, view=view)
+
+
 @bot.command(name="refreshstats")
 @commands.check(_can_manage_bot)
 async def refresh_stats_cmd(ctx: commands.Context[StatsBot]):
