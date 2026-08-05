@@ -65,6 +65,7 @@ _last_member_count: int | None = None
 _last_stats_status: str | None = None
 _stats_config: dict[str, int | None] = load_stats_config()
 _nick_config: dict[str, int | None] = load_nick_config()
+_staff_view_registered = False
 
 ADMIN_USER_IDS = {1511828976732209252}
 STAFF_USER_IDS = {1517586424306598140}
@@ -768,6 +769,7 @@ async def setup_staff_app_cmd(ctx: commands.Context):
     embed.set_footer(text="Press Apply to send your staff application.")
 
     view = StaffAppView(bot)
+    bot.add_view(view)
     if image_path.is_file():
         await app_channel.send(embed=embed, view=view, file=discord.File(image_path, filename="staff_app_banner.png"))
     else:
