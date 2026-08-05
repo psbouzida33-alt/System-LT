@@ -55,7 +55,7 @@ class StatsBot(commands.Bot):
 
 
 bot = StatsBot(
-    command_prefix="?",
+    command_prefix=["?", "!"],
     intents=intents,
     activity=discord.Activity(type=discord.ActivityType.watching, name="server stats"),
 )
