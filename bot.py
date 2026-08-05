@@ -410,6 +410,9 @@ async def on_interaction(interaction: discord.Interaction) -> None:
     if interaction.type != discord.InteractionType.component:
         return
 
+    if interaction.response.is_done():
+        return
+
     custom_id = interaction.data.get("custom_id") if isinstance(interaction.data, dict) else None
     if custom_id == "nickrequest:open":
         if interaction.guild is None:

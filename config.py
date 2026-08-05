@@ -14,7 +14,7 @@ TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("LEVELS_BOT_TOKEN")
 # --- Server IDs & stats layout ---
 BOT_VOICE_CHANNEL_ID = 1533639367590019183
 STAFF_PICK_CHANNEL_ID = 1534586562447282258
-STAFF_APP_CHANNEL_ID = 1534583845884792874
+STAFF_APP_CHANNEL_ID = 1534586562447282258
 
 def _get_env_int(name: str, default: int | None = None) -> int | None:
     value = os.getenv(name)
