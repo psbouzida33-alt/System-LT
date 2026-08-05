@@ -688,11 +688,41 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
             applicant_name=str(interaction.user),
             applicant_mention=interaction.user.mention,
         )
-        await staff_channel.send(embed=embed, view=review_view)
-        await interaction.response.send_message(
-            "Thank you — your staff application has been submitted.",
-            ephemeral=True,
-        )
+
+        # Defer the interaction so we have time to post the embed to the staff
+        # channel and avoid the "didn't respond in time" error shown in the UI.
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except Exception:
+            # If defer fails, proceed — we'll try to follow up directly.
+            pass
+
+        try:
+            await staff_channel.send(embed=embed, view=review_view)
+            try:
+                await interaction.followup.send(
+                    "Thank you — your staff application has been submitted.",
+                    ephemeral=True,
+                )
+            except Exception:
+                # Fallback: attempt a direct response if followup failed
+                try:
+                    await interaction.response.send_message(
+                        "Thank you — your staff application has been submitted.",
+                        ephemeral=True,
+                    )
+                except Exception:
+                    pass
+        except Exception as exc:
+            # Report failure back to the user while avoiding an unhandled exception
+            try:
+                await interaction.followup.send(
+                    "Failed to submit your application — please try again later.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+            print(f"[staff apply] failed to send application to staff channel: {exc}")
 
 
 class StaffApplicationReviewView(discord.ui.View):
