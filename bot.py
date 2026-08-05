@@ -757,7 +757,7 @@ async def setup_staff_app_cmd(ctx: commands.Context):
         inline=False,
     )
 
-    image_url = "https://i.imgur.com/6S0MMRI.png"
+    image_url = "https://i.imgur.com/WbOpn5L.jpeg"
     image_path = Path("staff_app_banner.png")
     if image_path.is_file():
         embed.set_image(url="attachment://staff_app_banner.png")
