@@ -52,6 +52,7 @@ intents.message_content = True
 class StatsBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.add_view(NicknameRequestView())
+        self.add_view(StaffAppView(self))
 
 
 bot = StatsBot(
