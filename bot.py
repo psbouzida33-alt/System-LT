@@ -733,13 +733,13 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
             applicant_mention=interaction.user.mention,
         )
 
-        # Defer the interaction so we have time to post the embed to the staff
-        # channel and avoid the "didn't respond in time" error shown in the UI.
         try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception:
-            # If defer fails, proceed — we'll try to follow up directly.
-            pass
+            await interaction.response.send_message(
+                "Your application is being submitted...",
+                ephemeral=True,
+            )
+        except Exception as exc:
+            print(f"[staff apply] initial response failed: {exc}")
 
         try:
             # Check bot permissions in the staff channel before sending
@@ -749,41 +749,15 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
                 if isinstance(staff_channel, discord.TextChannel) and bot_member is not None:
                     perms = staff_channel.permissions_for(bot_member)
                     if not perms.send_messages or not perms.embed_links:
-                        await interaction.followup.send(
-                            "I can't post the application to the staff channel because I lack permission to send messages or embed links there. Please ask an admin to grant me the needed permissions.",
-                            ephemeral=True,
-                        )
                         print(f"[staff apply] missing send/embed permissions in channel {staff_channel.id}")
                         return
             except Exception as perm_exc:
                 print(f"[staff apply] permission check failed: {perm_exc}")
 
             await staff_channel.send(embed=embed, view=review_view)
-            try:
-                await interaction.followup.send(
-                    "Thank you — your staff application has been submitted.",
-                    ephemeral=True,
-                )
-            except Exception:
-                # Fallback: attempt a direct response if followup failed
-                try:
-                    await interaction.response.send_message(
-                        "Thank you — your staff application has been submitted.",
-                        ephemeral=True,
-                    )
-                except Exception:
-                    pass
         except Exception as exc:
-            # Report failure back to the user while avoiding an unhandled exception
-            try:
-                await interaction.followup.send(
-                    "Failed to submit your application — please try again later.",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
             print(f"[staff apply] failed to send application to staff channel: {exc}")
-
+*** End Patch
 
 class StaffApplicationReviewView(discord.ui.View):
     def __init__(self, applicant_id: int, applicant_name: str, applicant_mention: str):
