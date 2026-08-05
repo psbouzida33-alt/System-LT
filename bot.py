@@ -756,11 +756,6 @@ async def setup_staff_app_cmd(ctx: commands.Context):
         ),
         inline=False,
     )
-    embed.add_field(
-        name="Staff review channel",
-        value=app_channel.mention,
-        inline=False,
-    )
 
     image_path = Path("staff_app_banner.png")
     if image_path.is_file():
