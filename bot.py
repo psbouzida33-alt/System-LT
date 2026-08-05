@@ -698,6 +698,22 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
             pass
 
         try:
+            # Check bot permissions in the staff channel before sending
+            try:
+                guild = interaction.guild
+                bot_member = guild.me if guild is not None else None
+                if isinstance(staff_channel, discord.TextChannel) and bot_member is not None:
+                    perms = staff_channel.permissions_for(bot_member)
+                    if not perms.send_messages or not perms.embed_links:
+                        await interaction.followup.send(
+                            "I can't post the application to the staff channel because I lack permission to send messages or embed links there. Please ask an admin to grant me the needed permissions.",
+                            ephemeral=True,
+                        )
+                        print(f"[staff apply] missing send/embed permissions in channel {staff_channel.id}")
+                        return
+            except Exception as perm_exc:
+                print(f"[staff apply] permission check failed: {perm_exc}")
+
             await staff_channel.send(embed=embed, view=review_view)
             try:
                 await interaction.followup.send(
