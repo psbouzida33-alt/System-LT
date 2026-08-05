@@ -410,6 +410,30 @@ async def on_interaction(interaction: discord.Interaction) -> None:
     if interaction.type != discord.InteractionType.component:
         return
 
+    if interaction.response.is_done():
+        return
+
+    custom_id = interaction.data.get("custom_id") if isinstance(interaction.data, dict) else None
+    if custom_id == "staff_app.apply":
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This button can only be used inside a server.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_modal(StaffApplicationModal())
+        return
+
+    if custom_id == "nickrequest:open":
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This button can only be used inside a server.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_modal(NicknameRequestModal(requester=interaction.user, admin_channel=None))
+        return
+
 
 @bot.event
 async def on_voice_state_update(
