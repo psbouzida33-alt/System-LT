@@ -421,7 +421,17 @@ async def on_interaction(interaction: discord.Interaction) -> None:
                 ephemeral=True,
             )
             return
-        await interaction.response.send_modal(StaffApplicationModal())
+        try:
+            await interaction.response.send_modal(StaffApplicationModal())
+        except Exception as exc:
+            print(f"[staff apply] failed to open modal: {exc}")
+            try:
+                await interaction.response.send_message(
+                    "Unable to open the staff application form right now. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
         return
 
     if custom_id == "nickrequest:open":
@@ -431,7 +441,17 @@ async def on_interaction(interaction: discord.Interaction) -> None:
                 ephemeral=True,
             )
             return
-        await interaction.response.send_modal(NicknameRequestModal(requester=interaction.user, admin_channel=None))
+        try:
+            await interaction.response.send_modal(NicknameRequestModal(requester=interaction.user, admin_channel=None))
+        except Exception as exc:
+            print(f"[nickname] failed to open modal: {exc}")
+            try:
+                await interaction.response.send_message(
+                    "Unable to open nickname request modal right now. Please try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
         return
 
 
