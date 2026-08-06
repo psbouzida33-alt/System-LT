@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import commands, tasks
+from discord.ext.commands.view import StringView
 from dotenv import load_dotenv
 
 from config import (
@@ -22,6 +23,7 @@ from config import (
     CLOCK_ROTATION_SECONDS,
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
+    NICK_PANEL_CHANNEL_ID,
     STAFF_APP_CHANNEL_ID,
     STAFF_PICK_CHANNEL_ID,
     STATS_CATEGORY_NAME,
@@ -53,6 +55,7 @@ intents.message_content = True
 class StatsBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.add_view(NicknameRequestView())
+        self.add_view(AdminApproveView(requester_id=0, requested_nick=""))
         self.add_view(StaffAppView(self))
         self.add_view(
             StaffApplicationReviewView(
@@ -453,8 +456,21 @@ async def on_interaction(interaction: discord.Interaction) -> None:
                 ephemeral=True,
             )
             return
+        admin_channel: discord.TextChannel | None = None
+        if interaction.guild:
+            saved_id = _nick_config.get("review_channel_id")
+            if saved_id:
+                saved_channel = interaction.guild.get_channel(int(saved_id))
+                if isinstance(saved_channel, discord.TextChannel):
+                    admin_channel = saved_channel
+
         try:
-            await interaction.response.send_modal(ChangeNameModal())
+            await interaction.response.send_modal(
+                NicknameRequestModal(
+                    requester=interaction.user,
+                    admin_channel=admin_channel,
+                )
+            )
         except Exception as exc:
             print(f"[nickname] failed to open modal: {exc}")
             try:
@@ -465,6 +481,10 @@ async def on_interaction(interaction: discord.Interaction) -> None:
             except Exception:
                 pass
         return
+
+    if custom_id and custom_id.startswith("comment_panel:"):
+        if await _handle_legacy_panel_interaction(interaction, custom_id):
+            return
 
 
 @bot.event
@@ -1310,32 +1330,47 @@ class SetNickReviewModal(discord.ui.Modal, title="Set Nickname Review Channel"):
             await interaction.followup.send(f"Failed to set review channel: {exc}", ephemeral=True)
 
 
-async def _delete_message_after(message: discord.Message, delay: float) -> None:
-    await asyncio.sleep(delay)
-    try:
-        await message.delete()
-    except (discord.Forbidden, discord.HTTPException):
-        pass
+def _panel_command_context(interaction: discord.Interaction) -> commands.Context[StatsBot]:
+    """Build a real command context so panel buttons can invoke existing commands."""
+    if interaction.channel_id is None:
+        raise RuntimeError("This action requires a channel.")
 
+    channel = interaction.channel
+    if channel is None:
+        channel = discord.PartialMessageable(
+            state=interaction.client._connection,
+            guild_id=interaction.guild_id,
+            id=interaction.channel_id,
+        )
 
-class _CommandContextProxy:
-    def __init__(self, interaction: discord.Interaction):
-        self.bot = bot
-        self.guild = interaction.guild
-        self.channel = interaction.channel
-        self.author = interaction.user
-        self.message = None
-        self.prefix = "?"
-        self._interaction = interaction
+    message = discord.Message(
+        state=interaction.client._connection,
+        channel=channel,
+        data={
+            "id": interaction.id,
+            "reactions": [],
+            "embeds": [],
+            "mention_everyone": False,
+            "tts": False,
+            "pinned": False,
+            "edited_timestamp": None,
+            "type": discord.MessageType.default.value,
+            "flags": 0,
+            "content": "",
+            "mentions": [],
+            "mention_roles": [],
+            "attachments": [],
+        },
+    )
+    message.author = interaction.user
 
-    async def send(self, content: str | None = None, **kwargs: Any) -> Any:
-        if not isinstance(self._interaction.channel, discord.TextChannel):
-            raise RuntimeError("This action requires a text channel.")
-        delete_after = kwargs.pop("delete_after", None)
-        message = await self._interaction.channel.send(content=content, **kwargs)
-        if delete_after is not None:
-            asyncio.create_task(_delete_message_after(message, float(delete_after)))
-        return message
+    return commands.Context[StatsBot](
+        message=message,
+        bot=bot,
+        view=StringView(""),
+        prefix="?",
+        interaction=interaction,
+    )
 
 
 def _interaction_has_manage_guild(interaction: discord.Interaction) -> bool:
@@ -1351,7 +1386,7 @@ async def _invoke_existing_command(
     *args: Any,
     **kwargs: Any,
 ) -> Any:
-    ctx = _CommandContextProxy(interaction)
+    ctx = _panel_command_context(interaction)
     try:
         if isinstance(command_callback, commands.Command):
             return await command_callback.invoke(ctx, *args, **kwargs)
@@ -1647,6 +1682,117 @@ async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
         await ctx.send(f"Failed to post control panel: {exc}")
 
 
+async def _handle_legacy_panel_interaction(
+    interaction: discord.Interaction,
+    custom_id: str,
+) -> bool:
+    """Handle older panels that still use comment_panel:* button IDs."""
+    panel = CommentPanelView()
+
+    if custom_id == "comment_panel:changename":
+        if interaction.guild is None:
+            await _reply_ephemeral(interaction, "This action must be used inside a server.")
+            return True
+        await interaction.response.send_modal(ChangeNameModal())
+        return True
+
+    legacy_modals: dict[str, tuple[discord.ui.Modal, dict[str, Any]]] = {
+        "comment_panel:customnotice": (
+            SendNotVerifyModal(),
+            {"require_auth": True},
+        ),
+        "comment_panel:poststaffpanels": (
+            PostStaffPanelsModal(),
+            {"require_manage_guild": True},
+        ),
+        "comment_panel:setnickreview": (
+            SetNickReviewModal(),
+            {"require_auth": True},
+        ),
+    }
+    if custom_id in legacy_modals:
+        modal, opts = legacy_modals[custom_id]
+        allowed, error = _panel_user_can_run(interaction, **opts)
+        if not allowed:
+            await _reply_ephemeral(interaction, error or "You are not allowed to use this action.")
+            return True
+        await interaction.response.send_modal(modal)
+        return True
+
+    legacy_commands: dict[str, tuple[Any, dict[str, Any]]] = {
+        "comment_panel:postpanel": (
+            setup_command_spanel_cmd,
+            {
+                "require_auth": True,
+                "require_guild": True,
+                "require_text_channel": True,
+                "success_message": "Control panel posted in this channel.",
+            },
+        ),
+        "comment_panel:setupstats": (
+            setup_stats_cmd,
+            {
+                "require_auth": True,
+                "require_guild": True,
+                "require_text_channel": True,
+                "success_message": "Stats channels created and configured.",
+            },
+        ),
+        "comment_panel:setupstaffapp": (
+            setup_staff_app_cmd,
+            {
+                "require_manage_guild": True,
+                "success_message": "Staff application panel posted.",
+            },
+        ),
+        "comment_panel:refreshstats": (
+            refresh_stats_cmd,
+            {
+                "require_auth": True,
+                "success_message": "Stats channel refreshed.",
+            },
+        ),
+        "comment_panel:sendnotice": (
+            send_not_verify_cmd,
+            {
+                "require_auth": True,
+                "require_guild": True,
+                "success_message": "Default verification reminder sent to not-verify members.",
+            },
+        ),
+        "comment_panel:restartlounge": (
+            restart_voice_lounge_cmd,
+            {
+                "require_auth": True,
+                "require_guild": True,
+                "success_message": "Voice lounge restart requested.",
+            },
+        ),
+        "comment_panel:getnickreview": (
+            get_nick_review_cmd,
+            {
+                "require_auth": True,
+                "require_guild": True,
+            },
+        ),
+        "comment_panel:ping": (ping_cmd, {}),
+        "comment_panel:setupnick": (
+            setup_nick_cmd,
+            {
+                "require_auth": True,
+                "require_text_channel": True,
+                "success_message": "Nickname request panel posted.",
+            },
+        ),
+    }
+    if custom_id in legacy_commands:
+        command, opts = legacy_commands[custom_id]
+        await panel._run_command(interaction, command, **opts)
+        return True
+
+    return False
+
+
 @bot.command(name="refreshstats")
 @commands.check(_can_manage_bot)
 async def refresh_stats_cmd(ctx: commands.Context[StatsBot]):
@@ -1697,7 +1843,77 @@ async def change_name_cmd(ctx: commands.Context[StatsBot], *, new_nick: str):
     except Exception as exc:
         await ctx.send(f"Could not change your nickname: {exc}", delete_after=10)
 
-# --- Nickname request UI (button opens ChangeNameModal → ?changename) ---
+# --- Nickname request UI ---
+class NicknameRequestModal(discord.ui.Modal, title="Change Your Nickname"):
+    new_nick: discord.ui.TextInput["NicknameRequestModal"] = discord.ui.TextInput(
+        label="What nickname would you like?",
+        placeholder="Example: Ahmed — keep it respectful and easy to read (max 32 characters)",
+        max_length=32,
+        required=True,
+    )
+
+    def __init__(
+        self,
+        requester: discord.Member | discord.User,
+        *,
+        admin_channel: discord.TextChannel | None,
+    ):
+        super().__init__()
+        self.requester = requester
+        self.admin_channel = admin_channel
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This nickname request must be made inside a server.",
+                ephemeral=True,
+            )
+            return
+
+        requested = self.new_nick.value.strip()
+        if not requested:
+            await interaction.response.send_message("Nickname cannot be empty.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            "Your nickname request has been sent to the staff for review.",
+            ephemeral=True,
+        )
+
+        if not isinstance(self.requester, discord.Member):
+            return
+
+        embed = discord.Embed(
+            title="Nickname change request",
+            description=(
+                f"User: {self.requester.mention}\n"
+                f"Requested nickname: **{requested}**"
+            ),
+            color=discord.Color.blue(),
+            timestamp=datetime.now(),
+        )
+        embed.set_footer(text=f"Requester ID: {self.requester.id}")
+
+        target = self.admin_channel
+        if target is None and interaction.guild:
+            saved_id = _nick_config.get("review_channel_id")
+            if saved_id:
+                saved_channel = interaction.guild.get_channel(int(saved_id))
+                if isinstance(saved_channel, discord.TextChannel):
+                    target = saved_channel
+
+        if target is None:
+            print("[nickname] no review channel configured; request not posted.")
+            return
+
+        view = AdminApproveView(requester_id=self.requester.id, requested_nick=requested)
+        try:
+            message = await target.send(embed=embed, view=view)
+            bot.add_view(view, message_id=message.id)
+        except Exception as exc:
+            print(f"[nickname] failed to post request to review channel: {exc}")
+
+
 class NicknameRequestView(discord.ui.View):
     def __init__(self, *, admin_channel: discord.TextChannel | None = None):
         super().__init__(timeout=None)
@@ -1713,8 +1929,21 @@ class NicknameRequestView(discord.ui.View):
             )
             return
 
+        admin_channel = self.admin_channel
+        if admin_channel is None:
+            saved_id = _nick_config.get("review_channel_id")
+            if saved_id:
+                saved_channel = interaction.guild.get_channel(int(saved_id))
+                if isinstance(saved_channel, discord.TextChannel):
+                    admin_channel = saved_channel
+
         try:
-            await interaction.response.send_modal(ChangeNameModal())
+            await interaction.response.send_modal(
+                NicknameRequestModal(
+                    requester=interaction.user,
+                    admin_channel=admin_channel,
+                )
+            )
         except Exception as exc:
             print(f"[nickname] failed to open modal: {exc}")
             try:
@@ -1726,6 +1955,103 @@ class NicknameRequestView(discord.ui.View):
                 pass
 
 
+class AdminApproveView(discord.ui.View):
+    def __init__(self, requester_id: int, requested_nick: str):
+        super().__init__(timeout=None)
+        self.requester_id = requester_id
+        self.requested_nick = requested_nick
+
+    def _ensure_request(self, interaction: discord.Interaction) -> bool:
+        if self.requester_id and self.requested_nick:
+            return True
+        message = interaction.message
+        if message is None or not message.embeds:
+            return False
+        embed = message.embeds[0]
+        footer_text = embed.footer.text if embed.footer else ""
+        if footer_text.startswith("Requester ID: "):
+            try:
+                self.requester_id = int(footer_text.removeprefix("Requester ID: ").strip())
+            except ValueError:
+                return False
+        description = embed.description or ""
+        match = re.search(r"Requested nickname: \*\*(.+?)\*\*", description)
+        if match:
+            self.requested_nick = match.group(1)
+        return bool(self.requester_id and self.requested_nick)
+
+    async def _is_authorized(self, member: discord.Member | discord.User) -> bool:
+        if not isinstance(member, discord.Member):
+            return False
+        return (
+            member.guild_permissions.manage_nicknames
+            or member.guild_permissions.manage_roles
+            or member.guild_permissions.manage_guild
+        )
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, custom_id="nickrequest:approve")
+    async def approve(self, interaction: discord.Interaction, button: Any) -> None:
+        del button
+        if not await self._is_authorized(interaction.user):
+            await interaction.response.send_message(
+                "You are not allowed to approve nickname requests.",
+                ephemeral=True,
+            )
+            return
+
+        if not self._ensure_request(interaction):
+            await interaction.response.send_message("Could not read this request.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Could not resolve guild.", ephemeral=True)
+            return
+
+        member = guild.get_member(self.requester_id)
+        if member is None:
+            await interaction.response.send_message("Member not found.", ephemeral=True)
+            return
+
+        try:
+            await member.edit(
+                nick=self.requested_nick,
+                reason=f"Approved by {interaction.user}",
+            )
+            await interaction.response.send_message(
+                f"Nickname for {member.mention} changed to **{self.requested_nick}**.",
+            )
+            for child in self.children:
+                if isinstance(child, discord.ui.Button):
+                    child.disabled = True
+            if interaction.message is not None:
+                await interaction.message.edit(view=self)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to change that member's nickname.",
+                ephemeral=True,
+            )
+        except Exception as exc:
+            await interaction.response.send_message(f"Failed to change nickname: {exc}", ephemeral=True)
+
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="nickrequest:reject")
+    async def reject(self, interaction: discord.Interaction, button: Any) -> None:
+        del button
+        if not await self._is_authorized(interaction.user):
+            await interaction.response.send_message(
+                "You are not allowed to reject nickname requests.",
+                ephemeral=True,
+            )
+            return
+
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        if interaction.message is not None:
+            await interaction.message.edit(view=self)
+        await interaction.response.send_message("Request rejected.")
+
+
 # `set_punishment` command removed per user request
 
 
@@ -1733,11 +2059,16 @@ class NicknameRequestView(discord.ui.View):
 @commands.guild_only()
 @commands.check(_can_manage_bot)
 async def setup_nick_cmd(ctx: commands.Context[StatsBot], admin_channel: discord.TextChannel | None = None):
-    """Post a nickname-request panel in this channel or a specified admin review channel.
+    """Post the nickname-request panel in the configured change-nickname channel.
 
-    Usage: `?setupnick` to post in current channel, or `?setupnick #requests` to configure an admin channel.
+    Usage: `?setupnick` to post in the configured panel channel, or
+    `?setupnick #review` to also set the staff review channel for requests.
     """
-    # If no admin_channel passed, check persisted config for this guild
+    panel_channel = await _get_configured_text_channel(bot, NICK_PANEL_CHANNEL_ID)
+    if panel_channel is None:
+        await ctx.send("Could not find the configured nickname panel channel.")
+        return
+
     if admin_channel is None:
         saved_id = _nick_config.get("review_channel_id")
         if saved_id and ctx.guild:
@@ -1760,7 +2091,12 @@ async def setup_nick_cmd(ctx: commands.Context[StatsBot], admin_channel: discord
         ),
         color=discord.Color.blurple(),
     )
-    await ctx.send(embed=embed, view=view)
+    message = await panel_channel.send(embed=embed, view=view)
+    bot.add_view(view, message_id=message.id)
+    await ctx.send(
+        f"Nickname request panel posted in {panel_channel.mention}.",
+        delete_after=10,
+    )
 
 
 # Do-Not-Disturb support removed per user request
