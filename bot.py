@@ -1163,6 +1163,84 @@ class CommentPanelView(discord.ui.View):
         await _reply_ephemeral(interaction, message)
 
     # Management actions
+    @discord.ui.button(label="Post Panel", style=discord.ButtonStyle.secondary, custom_id="comment_panel:postpanel", emoji="📋", row=0)
+    async def postpanel_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not _interaction_is_authorized(interaction):
+            await self._reply(interaction, "You must be staff or an admin to use this button.")
+            return
+
+        if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
+            await self._reply(interaction, "This button must be used in a server text channel.")
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        # Build the same panel embed as the typed command
+        embed = discord.Embed(
+            title="Server Control Panel",
+            description=(
+                "A polished dashboard for managing server tools and bot actions.\n"
+                "Click a button to run an action, or fill out the form when more details are needed."
+            ),
+            color=discord.Color.blurple(),
+        )
+
+        embed.add_field(
+            name="How to use",
+            value=(
+                "• Click a button to execute the action directly.\n"
+                "• Buttons that require extra details will open a popup form.\n"
+                "• Protected buttons require staff/admin access."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Management",
+            value=(
+                "📊 Setup stats channel\n"
+                "🧑‍💼 Create staff application panel\n"
+                "🔄 Refresh server stats"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Moderation",
+            value=(
+                "📩 Send notice to role members\n"
+                "✉️ Send a custom role notice\n"
+                "📝 Post staff application review panels"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Utility",
+            value=(
+                "🔁 Restart voice lounge\n"
+                "📡 Check bot latency\n"
+                "✏️ Open nickname request tools"
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Modern Discord-style control panel · Staff/Admin only")
+
+        view = CommentPanelView()
+        try:
+            image_path = Path("staff_app_banner.png")
+            if image_path.is_file():
+                embed.set_image(url="attachment://staff_app_banner.png")
+                message = await interaction.channel.send(
+                    embed=embed,
+                    view=view,
+                    file=discord.File(image_path, filename="staff_app_banner.png"),
+                )
+            else:
+                message = await interaction.channel.send(embed=embed, view=view)
+
+            bot.add_view(view, message_id=message.id)
+            await interaction.followup.send("Control panel posted.", ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(f"Failed to post panel: {exc}", ephemeral=True)
+
     @discord.ui.button(label="Stats Setup", style=discord.ButtonStyle.primary, custom_id="comment_panel:setupstats", emoji="📊", row=0)
     async def setupstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
