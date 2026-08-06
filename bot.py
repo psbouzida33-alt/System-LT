@@ -1256,7 +1256,17 @@ class CommentPanelView(discord.ui.View):
 
         view = StaffAppView(bot)
         try:
-            message = await staff_channel.send(embed=embed, view=view)
+            image_path = Path("staff_app_banner.png")
+            if image_path.is_file():
+                embed.set_image(url="attachment://staff_app_banner.png")
+                message = await staff_channel.send(
+                    embed=embed,
+                    view=view,
+                    file=discord.File(image_path, filename="staff_app_banner.png"),
+                )
+            else:
+                message = await staff_channel.send(embed=embed, view=view)
+
             bot.add_view(view, message_id=message.id)
             await interaction.followup.send("Staff application panel created.", ephemeral=True)
         except Exception as exc:
@@ -1456,6 +1466,15 @@ async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
     embed.set_footer(text="Modern Discord-style control panel · Staff/Admin only")
 
     view = CommentPanelView()
+    # send the panel
+    try:
+        image_path = Path("staff_app_banner.png")
+        if image_path.is_file():
+            await ctx.send(embed=embed, view=view, file=discord.File(image_path, filename="staff_app_banner.png"))
+        else:
+            await ctx.send(embed=embed, view=view)
+    except Exception as exc:
+        await ctx.send(f"Failed to post command panel: {exc}")
     await ctx.send(embed=embed, view=view)
 
 
