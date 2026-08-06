@@ -660,6 +660,86 @@ async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
         await status.edit(content=f"Setup failed: {exc}")
 
 
+def _build_staff_application_embed(interaction: discord.Interaction, *, answers: dict[str, str]) -> discord.Embed:
+    embed = discord.Embed(
+        title="New Staff Application",
+        color=discord.Color.blue(),
+        timestamp=datetime.now(),
+    )
+    embed.add_field(
+        name="Applicant",
+        value=f"{interaction.user.mention} ({interaction.user.id})",
+        inline=False,
+    )
+
+    origin = "Unknown"
+    if isinstance(interaction.channel, discord.TextChannel):
+        origin = interaction.channel.mention
+    elif isinstance(interaction.channel, discord.VoiceChannel):
+        origin = interaction.channel.mention
+    elif isinstance(interaction.channel, discord.Thread):
+        origin = interaction.channel.mention
+    embed.add_field(name="Origin channel", value=origin, inline=False)
+
+    for label, value in answers.items():
+        embed.add_field(name=label, value=value, inline=False)
+
+    return embed
+
+
+async def _publish_staff_application(
+    interaction: discord.Interaction,
+    *,
+    staff_channel: discord.TextChannel | None,
+    pick_channel: discord.TextChannel | None,
+    answers: dict[str, str],
+) -> None:
+    if staff_channel is None:
+        await interaction.response.send_message(
+            "Staff application channel is not configured or could not be found.",
+            ephemeral=True,
+        )
+        return
+
+    embed = _build_staff_application_embed(interaction, answers=answers)
+
+    # Do not send an ephemeral confirmation message in the channel.
+    # The application is published directly to the configured review channels.
+    try:
+        guild = interaction.guild
+        bot_member = guild.me if guild is not None else None
+        if isinstance(staff_channel, discord.TextChannel) and bot_member is not None:
+            perms = staff_channel.permissions_for(bot_member)
+            if not perms.send_messages or not perms.embed_links:
+                print(f"[staff apply] missing send/embed permissions in channel {staff_channel.id}")
+                return
+    except Exception as perm_exc:
+        print(f"[staff apply] permission check failed: {perm_exc}")
+
+    try:
+        review_view = StaffApplicationReviewView(
+            applicant_id=interaction.user.id,
+            applicant_name=str(interaction.user),
+            applicant_mention=interaction.user.mention,
+        )
+        message = await staff_channel.send(embed=embed, view=review_view)
+        bot.add_view(review_view, message_id=message.id)
+    except Exception as exc:
+        print(f"[staff apply] failed to send application to staff channel: {exc}")
+
+    if isinstance(pick_channel, discord.TextChannel):
+        try:
+            review_view = StaffApplicationReviewView(
+                applicant_id=interaction.user.id,
+                applicant_name=str(interaction.user),
+                applicant_mention=interaction.user.mention,
+            )
+            message = await pick_channel.send(embed=embed, view=review_view)
+            bot.add_view(review_view, message_id=message.id)
+        except Exception as pick_exc:
+            print(f"[staff apply] failed to send to pick channel: {pick_exc}")
+
+
 class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
     q1 = discord.ui.TextInput(
         label="Can you be active daily and supportive?",
@@ -699,6 +779,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         staff_channel = interaction.client.get_channel(STAFF_APP_CHANNEL_ID)
+        pick_channel = interaction.client.get_channel(STAFF_PICK_CHANNEL_ID)
         if not isinstance(staff_channel, discord.TextChannel):
             await interaction.response.send_message(
                 "Staff application channel is not configured or could not be found.",
@@ -706,71 +787,19 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
             )
             return
 
-        embed = discord.Embed(
-            title="New Staff Application",
-            color=discord.Color.blue(),
-            timestamp=datetime.now(),
+        answers: dict[str, str] = {
+            str(self.q1.label or "Question 1"): str(self.q1.value or ""),
+            str(self.q2.label or "Question 2"): str(self.q2.value or ""),
+            str(self.q3.label or "Question 3"): str(self.q3.value or ""),
+            str(self.q4.label or "Question 4"): str(self.q4.value or ""),
+            str(self.q5.label or "Question 5"): str(self.q5.value or ""),
+        }
+        await _publish_staff_application(
+            interaction,
+            staff_channel=staff_channel,
+            pick_channel=pick_channel if isinstance(pick_channel, discord.TextChannel) else None,
+            answers=answers,
         )
-        embed.add_field(
-            name="Applicant",
-            value=f"{interaction.user.mention} ({interaction.user.id})",
-            inline=False,
-        )
-        origin = "Unknown"
-        if isinstance(interaction.channel, discord.TextChannel):
-            origin = interaction.channel.mention
-        elif isinstance(interaction.channel, discord.VoiceChannel):
-            origin = interaction.channel.mention
-        elif isinstance(interaction.channel, discord.Thread):
-            origin = interaction.channel.mention
-        embed.add_field(name="Origin channel", value=origin, inline=False)
-        embed.add_field(name=self.q1.label, value=self.q1.value, inline=False)
-        embed.add_field(name=self.q2.label, value=self.q2.value, inline=False)
-        embed.add_field(name=self.q3.label, value=self.q3.value, inline=False)
-        embed.add_field(name=self.q4.label, value=self.q4.value, inline=False)
-        embed.add_field(name=self.q5.label, value=self.q5.value, inline=False)
-
-        review_view = StaffApplicationReviewView(
-            applicant_id=interaction.user.id,
-            applicant_name=str(interaction.user),
-            applicant_mention=interaction.user.mention,
-        )
-
-        try:
-            await interaction.response.send_message(
-                "Your application is being submitted...",
-                ephemeral=True,
-            )
-        except Exception as exc:
-            print(f"[staff apply] initial response failed: {exc}")
-
-        try:
-            # Check bot permissions in the staff channel before sending
-            try:
-                guild = interaction.guild
-                bot_member = guild.me if guild is not None else None
-                if isinstance(staff_channel, discord.TextChannel) and bot_member is not None:
-                    perms = staff_channel.permissions_for(bot_member)
-                    if not perms.send_messages or not perms.embed_links:
-                        print(f"[staff apply] missing send/embed permissions in channel {staff_channel.id}")
-                        return
-            except Exception as perm_exc:
-                print(f"[staff apply] permission check failed: {perm_exc}")
-
-            # Send application to the configured staff channel
-            await staff_channel.send(embed=embed, view=review_view)
-
-            # Also post the review panel to the pick-a-new-staff channel (staff pick)
-            try:
-                pick_channel = interaction.client.get_channel(STAFF_PICK_CHANNEL_ID)
-                if isinstance(pick_channel, discord.TextChannel):
-                    await pick_channel.send(embed=embed, view=review_view)
-                else:
-                    print(f"[staff apply] pick channel {STAFF_PICK_CHANNEL_ID} not found or not a text channel")
-            except Exception as pick_exc:
-                print(f"[staff apply] failed to send to pick channel: {pick_exc}")
-        except Exception as exc:
-            print(f"[staff apply] failed to send application to staff channel: {exc}")
 
 class StaffApplicationReviewView(discord.ui.View):
     def __init__(self, applicant_id: int, applicant_name: str, applicant_mention: str):
@@ -1033,6 +1062,29 @@ async def _dispatch_not_verify_message(guild: discord.Guild, custom_message: str
     return sent, failed
 
 
+class ChangeNameModal(discord.ui.Modal, title="Change Your Nickname"):
+    new_nick: discord.ui.TextInput["ChangeNameModal"] = discord.ui.TextInput(
+        label="What should be your new nickname?",
+        placeholder="Enter your new nickname...",
+        max_length=32,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This must be used inside a server.", ephemeral=True)
+            return
+
+        try:
+            await _invoke_existing_command(
+                interaction,
+                change_name_cmd,
+                new_nick=self.new_nick.value,
+            )
+            await interaction.response.send_message("Nickname change command executed.", ephemeral=True)
+        except Exception as exc:
+            await interaction.response.send_message(f"Failed to change nickname: {exc}", ephemeral=True)
+
+
 class SendNotVerifyModal(discord.ui.Modal, title="Send Not-Verify Notice"):
     custom_message: discord.ui.TextInput["SendNotVerifyModal"] = discord.ui.TextInput(
         label="Message to send",
@@ -1051,16 +1103,14 @@ class SendNotVerifyModal(discord.ui.Modal, title="Send Not-Verify Notice"):
             return
 
         try:
-            sent, failed = await _dispatch_not_verify_message(
-                interaction.guild,
-                self.custom_message.value,
+            await _invoke_existing_command(
+                interaction,
+                send_not_verify_cmd,
+                custom_message=self.custom_message.value,
             )
-            await interaction.response.send_message(
-                f"Custom notice sent to {sent} members. Failed: {failed}.",
-                ephemeral=True,
-            )
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            await interaction.response.send_message("Custom notice command executed.", ephemeral=True)
+        except Exception as exc:
+            await interaction.response.send_message(f"Failed to send custom notice: {exc}", ephemeral=True)
 
 
 class PostStaffPanelsModal(discord.ui.Modal, title="Post Staff Panels"):
@@ -1087,48 +1137,15 @@ class PostStaffPanelsModal(discord.ui.Modal, title="Post Staff Panels"):
         app_channel = bot.get_channel(channel_a_id)
         review_channel = bot.get_channel(channel_b_id)
 
-        if isinstance(app_channel, discord.TextChannel):
-            embed = discord.Embed(
-                title="STAFF APPLICATION",
-                description=(
-                    "We’re looking for active, respectful, and dedicated members to join our staff team. "
-                    "If you enjoy helping others, keeping the community safe, and contributing to a positive environment, "
-                    "this is your chance to apply."
-                ),
-                color=discord.Color.red(),
+        try:
+            await _invoke_existing_command(
+                interaction,
+                post_staff_panels_cmd,
+                member=interaction.guild.get_member(interaction.user.id),
             )
-            embed.add_field(
-                name="Why apply?",
-                value="• Exclusive staff role\n• Experience & teamwork\n• Support the community",
-                inline=False,
-            )
-            embed.add_field(name="Applicant", value=applicant_text, inline=False)
-            view = StaffAppView(bot)
-            await app_channel.send(embed=embed, view=view)
-
-        if isinstance(review_channel, discord.TextChannel):
-            embed2 = discord.Embed(
-                title="New Staff Application",
-                color=discord.Color.blue(),
-                timestamp=datetime.now(),
-            )
-            embed2.add_field(name="Applicant", value=applicant_text, inline=False)
-            embed2.add_field(
-                name="Origin channel",
-                value=app_channel.mention if isinstance(app_channel, discord.TextChannel) else "Unknown",
-                inline=False,
-            )
-            embed2.add_field(name="Q1", value="—", inline=False)
-            embed2.add_field(name="Q2", value="—", inline=False)
-            embed2.add_field(name="Q3", value="—", inline=False)
-            review_view = StaffApplicationReviewView(
-                applicant_id=interaction.user.id,
-                applicant_name=str(interaction.user),
-                applicant_mention=applicant_text,
-            )
-            await review_channel.send(embed=embed2, view=review_view)
-
-        await interaction.response.send_message("Staff panels posted successfully.", ephemeral=True)
+            await interaction.response.send_message("Staff panels command executed.", ephemeral=True)
+        except Exception as exc:
+            await interaction.response.send_message(f"Failed to post staff panels: {exc}", ephemeral=True)
 
 
 class SetNickReviewModal(discord.ui.Modal, title="Set Nickname Review Channel"):
@@ -1153,17 +1170,44 @@ class SetNickReviewModal(discord.ui.Modal, title="Set Nickname Review Channel"):
             )
             return
 
-        global _nick_config
-        _nick_config = {
-            "review_channel_id": channel.id,
-            "guild_id": interaction.guild.id,
-        }
-        save_nick_config(_nick_config)
+        try:
+            await _invoke_existing_command(
+                interaction,
+                set_nick_review_cmd,
+                channel,
+            )
+            await interaction.response.send_message(
+                f"Nickname review channel command executed for {channel.mention}.",
+                ephemeral=True,
+            )
+        except Exception as exc:
+            await interaction.response.send_message(f"Failed to set review channel: {exc}", ephemeral=True)
 
-        await interaction.response.send_message(
-            f"Nickname review channel is now set to {channel.mention}.",
-            ephemeral=True,
-        )
+
+class _CommandContextProxy:
+    def __init__(self, interaction: discord.Interaction):
+        self.bot = bot
+        self.guild = interaction.guild
+        self.channel = interaction.channel
+        self.author = interaction.user
+        self.message = None
+        self.prefix = "?"
+        self._interaction = interaction
+
+    async def send(self, content: str | None = None, **kwargs: Any) -> Any:
+        if not isinstance(self._interaction.channel, discord.TextChannel):
+            raise RuntimeError("This action requires a text channel.")
+        return await self._interaction.channel.send(content=content, **kwargs)
+
+
+async def _invoke_existing_command(
+    interaction: discord.Interaction,
+    command_callback: Any,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    ctx = _CommandContextProxy(interaction)
+    return await command_callback(ctx, *args, **kwargs)
 
 
 class CommentPanelView(discord.ui.View):
@@ -1186,6 +1230,10 @@ class CommentPanelView(discord.ui.View):
             return
 
         await interaction.response.defer(ephemeral=True)
+        await _invoke_existing_command(interaction, setup_command_spanel_cmd)
+        await interaction.followup.send("Command panel posted.", ephemeral=True)
+        return
+
         # Build the same panel embed as the typed command
         embed = discord.Embed(
             title="Server Control Panel",
@@ -1265,47 +1313,7 @@ class CommentPanelView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
         try:
-            guild = interaction.guild
-            overwrites = _stat_channel_overwrites(guild)
-            count = _guild_member_count(guild)
-            status_message = await interaction.channel.send(f"Creating **{STATS_CATEGORY_NAME}**…")
-            category = await guild.create_category(
-                name=STATS_CATEGORY_NAME,
-                overwrites=overwrites,
-                reason="Stats bot setup — stats category",
-            )
-            stats_channel = await guild.create_voice_channel(
-                name=_stats_channel_name(count),
-                category=category,
-                overwrites=overwrites,
-                reason="Stats bot setup — server stats",
-            )
-            await stats_channel.edit(status=_stats_channel_status(), reason="Stats bot setup — clock status")
-            try:
-                await category.edit(position=0)
-            except discord.HTTPException:
-                pass
-            global _stats_config, _last_member_count, _last_stats_status
-            _stats_config = {
-                "guild_id": guild.id,
-                "category_id": category.id,
-                "stats_channel_id": stats_channel.id,
-            }
-            save_stats_config(_stats_config)
-            _last_member_count = count
-            _last_stats_status = _stats_channel_status()
-            embed = discord.Embed(
-                title=f"{STATS_CATEGORY_NAME} — ready",
-                description=(
-                    f"Category: **{category.name}**\n"
-                    f"Stats channel: {stats_channel.mention}\n"
-                    f"• **Name:** member count\n"
-                    f"• **Status:** rotating world clock\n\n"
-                    "Channel is locked — display only."
-                ),
-                color=discord.Color.green(),
-            )
-            await status_message.edit(content=None, embed=embed)
+            await _invoke_existing_command(interaction, setup_stats_cmd)
             await interaction.followup.send("Stats setup completed.", ephemeral=True)
         except Exception as exc:
             await interaction.followup.send(f"Stats setup failed: {exc}", ephemeral=True)
@@ -1318,45 +1326,8 @@ class CommentPanelView(discord.ui.View):
             return
 
         await interaction.response.defer(ephemeral=True)
-        staff_channel = bot.get_channel(STAFF_APP_CHANNEL_ID)
-        if not isinstance(staff_channel, discord.TextChannel):
-            await interaction.followup.send("The staff application channel is not configured or available.", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title="STAFF APPLICATION",
-            description=(
-                "We’re looking for active, respectful, and dedicated members to join our staff team. "
-                "If you enjoy helping others, keeping the community safe, and contributing to a positive environment, "
-                "this is your chance to apply."
-            ),
-            color=discord.Color.red(),
-        )
-        embed.add_field(
-            name="Why apply?",
-            value=(
-                "• Exclusive staff role\n"
-                "• Experience & teamwork\n"
-                "• Support the community"
-            ),
-            inline=False,
-        )
-        embed.set_footer(text="Press Apply to send your staff application.")
-
-        view = StaffAppView(bot)
         try:
-            image_path = Path("staff_app_banner.png")
-            if image_path.is_file():
-                embed.set_image(url="attachment://staff_app_banner.png")
-                message = await staff_channel.send(
-                    embed=embed,
-                    view=view,
-                    file=discord.File(image_path, filename="staff_app_banner.png"),
-                )
-            else:
-                message = await staff_channel.send(embed=embed, view=view)
-
-            bot.add_view(view, message_id=message.id)
+            await _invoke_existing_command(interaction, setup_staff_app_cmd)
             await interaction.followup.send("Staff application panel created.", ephemeral=True)
         except Exception as exc:
             await interaction.followup.send(f"Failed to create staff application panel: {exc}", ephemeral=True)
@@ -1369,8 +1340,11 @@ class CommentPanelView(discord.ui.View):
             return
 
         await interaction.response.defer(ephemeral=True)
-        await refresh_all_stats(force_members=True)
-        await interaction.followup.send("Stats refreshed.", ephemeral=True)
+        try:
+            await _invoke_existing_command(interaction, refresh_stats_cmd)
+            await interaction.followup.send("Stats refreshed.", ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(f"Failed to refresh stats: {exc}", ephemeral=True)
 
     # Moderation buttons
     @discord.ui.button(label="Send Notice", style=discord.ButtonStyle.danger, custom_id="comment_panel:sendnotice", emoji="📩", row=1)
@@ -1386,10 +1360,8 @@ class CommentPanelView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
         try:
-            sent, failed = await _dispatch_not_verify_message(interaction.guild, None)
-            await interaction.followup.send(f"Default notice sent to {sent} members. Failed: {failed}.", ephemeral=True)
-        except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await _invoke_existing_command(interaction, send_not_verify_cmd)
+            await interaction.followup.send("Default notice command executed.", ephemeral=True)
         except Exception as exc:
             await interaction.followup.send(f"Failed to send notice: {exc}", ephemeral=True)
 
@@ -1424,9 +1396,11 @@ class CommentPanelView(discord.ui.View):
             return
 
         await interaction.response.defer(ephemeral=True)
-        await _disconnect_guild_voice_client(interaction.guild)
-        await _join_voice_lounge()
-        await interaction.followup.send("Voice lounge restart requested.", ephemeral=True)
+        try:
+            await _invoke_existing_command(interaction, restart_voice_lounge_cmd)
+            await interaction.followup.send("Voice lounge restart requested.", ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(f"Failed to restart voice lounge: {exc}", ephemeral=True)
 
     @discord.ui.button(label="Who Reviews", style=discord.ButtonStyle.secondary, custom_id="comment_panel:getnickreview", emoji="🔎", row=2)
     async def getnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -1439,21 +1413,18 @@ class CommentPanelView(discord.ui.View):
             await self._reply(interaction, "This button must be used in a server.")
             return
 
-        saved_id = _nick_config.get("review_channel_id")
-        if not saved_id:
-            await self._reply(interaction, "No nickname review channel is configured.")
-            return
-
-        channel = interaction.guild.get_channel(int(saved_id))
-        if isinstance(channel, discord.TextChannel):
-            await self._reply(interaction, f"Current review channel: {channel.mention}")
-        else:
-            await self._reply(interaction, "The configured review channel is not available in this server.")
+        try:
+            await _invoke_existing_command(interaction, get_nick_review_cmd)
+        except Exception as exc:
+            await self._reply(interaction, f"Failed to check review channel: {exc}")
 
     @discord.ui.button(label="Ping", style=discord.ButtonStyle.secondary, custom_id="comment_panel:ping", emoji="📡", row=2)
     async def ping_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        await self._reply(interaction, f"Pong! Current latency is {round(bot.latency * 1000)}ms.")
+        try:
+            await _invoke_existing_command(interaction, ping_cmd)
+        except Exception as exc:
+            await self._reply(interaction, f"Failed to run ping: {exc}")
 
     # Nickname & review buttons
     @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.success, custom_id="comment_panel:changename", emoji="✏️", row=3)
@@ -1476,21 +1447,11 @@ class CommentPanelView(discord.ui.View):
             await self._reply(interaction, "This button must be used in a server text channel.")
             return
 
-        view = NicknameRequestView(admin_channel=None)
-        embed = discord.Embed(
-            title="Nickname Request",
-            description=(
-                "Use the button below to request a nickname change.\n\n"
-                "Rule reminders:\n"
-                "• Keep nicknames appropriate and respectful\n"
-                "• Do not impersonate staff or members\n"
-                "• Avoid offensive or explicit text\n"
-                "• Keep it readable and rule-compliant"
-            ),
-            color=discord.Color.blurple(),
-        )
-        await interaction.channel.send(embed=embed, view=view)
-        await self._reply(interaction, "Nickname request panel posted.")
+        try:
+            await _invoke_existing_command(interaction, setup_nick_cmd)
+            await self._reply(interaction, "Nickname request panel posted.")
+        except Exception as exc:
+            await self._reply(interaction, f"Failed to post nickname panel: {exc}")
 
     @discord.ui.button(label="Set Review", style=discord.ButtonStyle.secondary, custom_id="comment_panel:setnickreview", emoji="⚙️", row=3)
     async def setnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
