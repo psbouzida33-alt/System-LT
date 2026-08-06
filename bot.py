@@ -1221,7 +1221,7 @@ class CommentPanelView(discord.ui.View):
         except Exception as exc:
             await interaction.followup.send(f"Stats setup failed: {exc}", ephemeral=True)
 
-    @discord.ui.button(label="Staff App", style=discord.ButtonStyle.primary, custom_id="comment_panel:setupstaffapp", emoji="🧑‍💼", row=0)
+    @discord.ui.button(label="?setupstaffapp", style=discord.ButtonStyle.primary, custom_id="comment_panel:setupstaffapp", emoji="🧑‍💼", row=0)
     async def setupstaffapp_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         if not _interaction_is_authorized(interaction):
