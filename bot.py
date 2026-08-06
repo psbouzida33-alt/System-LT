@@ -1403,7 +1403,7 @@ class CommentPanelView(discord.ui.View):
         await interaction.response.send_modal(SetNickReviewModal())
 
 
-@bot.command(name="setupcommandspanel", aliases=["setupcommentpanel"])
+@bot.command(name="setupcommandspanel", aliases=["setupcommentpanel", "panel"])
 @commands.guild_only()
 @commands.check(_can_manage_bot)
 async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
