@@ -446,7 +446,7 @@ async def on_interaction(interaction: discord.Interaction) -> None:
             )
             return
         try:
-            await interaction.response.send_modal(NicknameRequestModal(requester=interaction.user, admin_channel=None))
+            await interaction.response.send_modal(ChangeNameModal())
         except Exception as exc:
             print(f"[nickname] failed to open modal: {exc}")
             try:
@@ -1039,39 +1039,6 @@ def _parse_member_reference(guild: discord.Guild, raw_value: str) -> discord.Mem
     return None
 
 
-async def _dispatch_not_verify_message(guild: discord.Guild, custom_message: str | None) -> tuple[int, int]:
-    if NOT_VERIFY_ROLE_ID is None:
-        raise ValueError("Not-verify role is not configured.")
-
-    role = guild.get_role(NOT_VERIFY_ROLE_ID)
-    if role is None:
-        raise ValueError("Not-verify role is not available in this server.")
-
-    message_text = (custom_message or "").strip()
-    use_template = message_text == ""
-    sent = 0
-    failed = 0
-
-    for member in role.members:
-            if member.bot:
-                continue
-            try:
-                if use_template:
-                    await member.send(
-                        NOT_VERIFY_DM_MESSAGE.format(
-                            member_name=member.display_name,
-                            role_name=NOT_VERIFY_ROLE_NAME,
-                            guild_name=guild.name,
-                        )
-                    )
-                else:
-                    await member.send(message_text)
-                sent += 1
-            except (discord.Forbidden, discord.HTTPException):
-                failed += 1
-    return sent, failed
-
-
 class ChangeNameModal(discord.ui.Modal, title="Change Your Nickname"):
     new_nick: discord.ui.TextInput["ChangeNameModal"] = discord.ui.TextInput(
         label="What should be your new nickname?",
@@ -1544,63 +1511,7 @@ async def change_name_cmd(ctx: commands.Context[StatsBot], *, new_nick: str):
     except Exception as exc:
         await ctx.send(f"Could not change your nickname: {exc}", delete_after=10)
 
-# --- Nickname request UI ---
-class NicknameRequestModal(discord.ui.Modal, title="Change Your Nickname"):
-    new_nick: discord.ui.TextInput["NicknameRequestModal"] = discord.ui.TextInput(
-        label="What should be your new nickname?",
-        placeholder="Enter your new nickname...",
-        max_length=32,
-    )
-
-    def __init__(self, requester: discord.Member | discord.User, *, admin_channel: discord.abc.GuildChannel | None):
-        super().__init__()
-        self.requester = requester
-        self.admin_channel = admin_channel
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "This nickname request must be made inside a server.",
-                ephemeral=True,
-            )
-            return
-
-        requested = self.new_nick.value.strip()
-        if not requested:
-            await interaction.response.send_message("Nickname cannot be empty.", ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-
-        if not isinstance(self.requester, discord.Member):
-            await interaction.followup.send(
-                "Could not change your nickname because you are not a server member.",
-                ephemeral=True,
-            )
-            return
-
-        try:
-            await self.requester.edit(
-                nick=requested,
-                reason="Nickname changed via bot request",
-            )
-            await interaction.followup.send(
-                f"Your nickname has been changed to **{requested}**.",
-                ephemeral=True,
-            )
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "I don't have permission to change your nickname.",
-                ephemeral=True,
-            )
-        except Exception as exc:
-            print(f"[nickname] failed to change nickname: {exc}")
-            await interaction.followup.send(
-                "Could not change your nickname right now. Please try again later.",
-                ephemeral=True,
-            )
-
-
+# --- Nickname request UI (button opens ChangeNameModal → ?changename) ---
 class NicknameRequestView(discord.ui.View):
     def __init__(self, *, admin_channel: discord.TextChannel | None = None):
         super().__init__(timeout=None)
@@ -1616,32 +1527,8 @@ class NicknameRequestView(discord.ui.View):
             )
             return
 
-        print(f"[nickname] open_modal pressed by {interaction.user} ({interaction.user.id})")
-        admin_channel = self.admin_channel
-        if admin_channel is None and interaction.guild:
-            saved_id = _nick_config.get("review_channel_id")
-            if saved_id:
-                saved_channel = interaction.guild.get_channel(int(saved_id))
-                if isinstance(saved_channel, discord.TextChannel):
-                    admin_channel = saved_channel
-
-        # Opt-in debug quick-response: set DEBUG_NICK_QUICK_RESP=1 in the environment
-        # (Render env vars) to make the button reply immediately with an ephemeral
-        # confirmation. This helps determine whether interactions reach the deployed
-        # instance (useful for diagnosing cold-start / timeout issues).
-        if os.environ.get("DEBUG_NICK_QUICK_RESP") == "1":
-            try:
-                await interaction.response.send_message(
-                    "Debug: button press received by bot.",
-                    ephemeral=True,
-                )
-                return
-            except Exception as exc:
-                print(f"[nickname] debug quick response failed: {exc}")
-
-        modal = NicknameRequestModal(requester=interaction.user, admin_channel=admin_channel)
         try:
-            await interaction.response.send_modal(modal)
+            await interaction.response.send_modal(ChangeNameModal())
         except Exception as exc:
             print(f"[nickname] failed to open modal: {exc}")
             try:
@@ -1651,70 +1538,6 @@ class NicknameRequestView(discord.ui.View):
                 )
             except Exception:
                 pass
-
-
-# Punishment panel removed per user request — modal and view code deleted
-
-
-class AdminApproveView(discord.ui.View):
-    def __init__(self, requester_id: int, requested_nick: str):
-        super().__init__(timeout=None)
-        self.requester_id = requester_id
-        self.requested_nick = requested_nick
-
-    async def _is_authorized(self, member: discord.Member | discord.User) -> bool:
-        if not isinstance(member, discord.Member):
-            return False
-        return (
-            member.guild_permissions.manage_nicknames
-            or member.guild_permissions.manage_roles
-            or member.guild_permissions.manage_guild
-        )
-
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, custom_id="nickrequest:approve")
-    async def approve(self, interaction: discord.Interaction, button: Any) -> None:
-        del button
-        if not await self._is_authorized(interaction.user):
-            await interaction.response.send_message("You are not allowed to approve nickname requests.", ephemeral=True)
-            return
-
-        guild = interaction.guild
-        if guild is None:
-            await interaction.response.send_message("Could not resolve guild.", ephemeral=True)
-            return
-
-        member = guild.get_member(self.requester_id)
-        if member is None:
-            await interaction.response.send_message("Member not found.", ephemeral=True)
-            return
-
-        try:
-            await member.edit(nick=self.requested_nick, reason=f"Approved by {interaction.user}")
-            await interaction.response.send_message(f"Nickname for {member.mention} changed to **{self.requested_nick}**.")
-            # disable buttons after action
-            for child in self.children:
-                if isinstance(child, discord.ui.Button):
-                    child.disabled = True
-            if interaction.message is not None:
-                await interaction.message.edit(view=self)
-        except discord.Forbidden:
-            await interaction.response.send_message("I don't have permission to change that member's nickname.", ephemeral=True)
-        except Exception as exc:
-            await interaction.response.send_message(f"Failed to change nickname: {exc}", ephemeral=True)
-
-    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="nickrequest:reject")
-    async def reject(self, interaction: discord.Interaction, button: Any) -> None:
-        del button
-        if not await self._is_authorized(interaction.user):
-            await interaction.response.send_message("You are not allowed to reject nickname requests.", ephemeral=True)
-            return
-
-        for child in self.children:
-            if isinstance(child, discord.ui.Button):
-                child.disabled = True
-        if interaction.message is not None:
-            await interaction.message.edit(view=self)
-        await interaction.response.send_message("Request rejected.")
 
 
 # `set_punishment` command removed per user request
