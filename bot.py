@@ -1511,7 +1511,7 @@ async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
             await ctx.send(embed=embed, view=view)
     except Exception as exc:
         await ctx.send(f"Failed to post command panel: {exc}")
-    await ctx.send(embed=embed, view=view)
+    # The panel has been sent above inside the try/except branch. Do not send it again.
 
 
 @bot.command(name="refreshstats")
