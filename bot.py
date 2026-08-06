@@ -958,76 +958,123 @@ async def post_staff_panels_cmd(ctx: commands.Context, member: discord.Member | 
     await ctx.send("Posted staff panels.", delete_after=8)
 
 
-class CommandsPanelView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+def _interaction_is_authorized(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        return False
+    author = interaction.user
+    return (
+        author.guild_permissions.manage_guild
+        or author.guild_permissions.manage_roles
+        or author.id in ADMIN_USER_IDS
+        or author.id in STAFF_USER_IDS
+    )
 
-    def _is_authorized(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            return False
-        author = interaction.user
-        return (
-            author.guild_permissions.manage_guild
-            or author.guild_permissions.manage_roles
-            or author.id in ADMIN_USER_IDS
-            or author.id in STAFF_USER_IDS
-        )
+async def _reply_ephemeral(interaction: discord.Interaction, message: str) -> None:
+    try:
+        await interaction.response.send_message(message, ephemeral=True)
+    except Exception:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
 
-    async def _reply(self, interaction: discord.Interaction, text: str) -> None:
-        await interaction.response.send_message(text, ephemeral=True)
 
-    @discord.ui.button(label="?sendnotverify", style=discord.ButtonStyle.secondary, custom_id="commands_panel:sendnotverify", row=0)
-    async def sendnotverify_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if not self._is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+def _parse_channel_reference(guild: discord.Guild, raw_value: str) -> discord.TextChannel | None:
+    raw_value = raw_value.strip()
+    if raw_value.startswith("<#") and raw_value.endswith(">"):
+        raw_value = raw_value[2:-1]
 
-        await self._reply(
-            interaction,
-            "?sendnotverify [message] — This command requires a custom message, so please run it manually in chat.",
-        )
+    if raw_value.isdigit():
+        channel = guild.get_channel(int(raw_value))
+        if isinstance(channel, discord.TextChannel):
+            return channel
+    return None
 
-    @discord.ui.button(label="?setupstats", style=discord.ButtonStyle.secondary, custom_id="commands_panel:setupstats", row=0)
-    async def setupstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if not self._is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
 
-        await self._reply(
-            interaction,
-            "?setupstats — Admin/staff button press acknowledged. Run this command manually if the panel is created in a guild channel.",
-        )
+async def _dispatch_not_verify_message(guild: discord.Guild, custom_message: str | None) -> tuple[int, int]:
+    if NOT_VERIFY_ROLE_ID is None:
+        raise ValueError("Not-verify role is not configured.")
 
-    @discord.ui.button(label="?setupstaffapp", style=discord.ButtonStyle.secondary, custom_id="commands_panel:setupstaffapp", row=0)
-    async def setupstaffapp_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if not self._is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+    role = guild.get_role(NOT_VERIFY_ROLE_ID)
+    if role is None:
+        raise ValueError("Not-verify role is not available in this server.")
 
-        await self._reply(
-            interaction,
-            "?setupstaffapp — Admin/staff button press acknowledged. Run this command manually if the panel is created in a guild channel.",
-        )
+    message_text = (custom_message or "").strip()
+    use_template = message_text == ""
+    sent = 0
+    failed = 0
 
-    @discord.ui.button(label="?poststaffpanels", style=discord.ButtonStyle.secondary, custom_id="commands_panel:poststaffpanels", row=0)
-    async def poststaffpanels_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if not self._is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+    for member in role.members:
+            if member.bot:
+                continue
+            try:
+                if use_template:
+                    await member.send(
+                        NOT_VERIFY_DM_MESSAGE.format(
+                            member_name=member.display_name,
+                            role_name=NOT_VERIFY_ROLE_NAME,
+                            guild_name=guild.name,
+                        )
+                    )
+                else:
+                    await member.send(message_text)
+                sent += 1
+            except (discord.Forbidden, discord.HTTPException):
+                failed += 1
+    return sent, failed
 
+
+class SendNotVerifyModal(discord.ui.Modal, title="Send Not-Verify Notice"):
+    custom_message: discord.ui.TextInput["SendNotVerifyModal"] = discord.ui.TextInput(
+        label="Message to send",
+        style=discord.TextStyle.long,
+        required=True,
+        placeholder="Type the message to send to members with the not-verify role.",
+        max_length=2000,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
-            await self._reply(interaction, "This button must be pressed in a server channel.")
+            await interaction.response.send_message(
+                "This action must be performed in a server.",
+                ephemeral=True,
+            )
             return
+
+        try:
+            sent, failed = await _dispatch_not_verify_message(
+                interaction.guild,
+                self.custom_message.value,
+            )
+            await interaction.response.send_message(
+                f"Custom notice sent to {sent} members. Failed: {failed}.",
+                ephemeral=True,
+            )
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+
+
+class PostStaffPanelsModal(discord.ui.Modal, title="Post Staff Panels"):
+    applicant_reference: discord.ui.TextInput["PostStaffPanelsModal"] = discord.ui.TextInput(
+        label="Member mention or ID",
+        style=discord.TextStyle.short,
+        required=False,
+        placeholder="Leave blank to use your own name",
+        max_length=100,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This must be used inside a server.", ephemeral=True)
+            return
+
+        applicant_text = self.applicant_reference.value.strip() or interaction.user.mention
+        if applicant_text.isdigit():
+            member = interaction.guild.get_member(int(applicant_text))
+            applicant_text = member.mention if member is not None else applicant_text
 
         channel_a_id = 1534583845884792874
         channel_b_id = 1534586562447282258
         app_channel = bot.get_channel(channel_a_id)
         review_channel = bot.get_channel(channel_b_id)
-        applicant_mention = interaction.user.mention
 
         if isinstance(app_channel, discord.TextChannel):
             embed = discord.Embed(
@@ -1039,14 +1086,14 @@ class CommandsPanelView(discord.ui.View):
                 ),
                 color=discord.Color.red(),
             )
-            embed.add_field(name="Why apply?", value="• Exclusive staff role\n• Experience & teamwork\n• Support the community", inline=False)
-            embed.add_field(name="Applicant", value=applicant_mention, inline=False)
+            embed.add_field(
+                name="Why apply?",
+                value="• Exclusive staff role\n• Experience & teamwork\n• Support the community",
+                inline=False,
+            )
+            embed.add_field(name="Applicant", value=applicant_text, inline=False)
             view = StaffAppView(bot)
-            try:
-                await app_channel.send(embed=embed, view=view)
-            except Exception as exc:
-                await self._reply(interaction, f"Failed to send panel to channel A: {exc}")
-                return
+            await app_channel.send(embed=embed, view=view)
 
         if isinstance(review_channel, discord.TextChannel):
             embed2 = discord.Embed(
@@ -1054,74 +1101,280 @@ class CommandsPanelView(discord.ui.View):
                 color=discord.Color.blue(),
                 timestamp=datetime.now(),
             )
-            embed2.add_field(name="Applicant", value=applicant_mention, inline=False)
-            embed2.add_field(name="Origin channel", value=app_channel.mention if isinstance(app_channel, discord.TextChannel) else "Unknown", inline=False)
+            embed2.add_field(name="Applicant", value=applicant_text, inline=False)
+            embed2.add_field(
+                name="Origin channel",
+                value=app_channel.mention if isinstance(app_channel, discord.TextChannel) else "Unknown",
+                inline=False,
+            )
             embed2.add_field(name="Q1", value="—", inline=False)
             embed2.add_field(name="Q2", value="—", inline=False)
             embed2.add_field(name="Q3", value="—", inline=False)
             review_view = StaffApplicationReviewView(
                 applicant_id=interaction.user.id,
                 applicant_name=str(interaction.user),
-                applicant_mention=applicant_mention,
+                applicant_mention=applicant_text,
             )
+            await review_channel.send(embed=embed2, view=review_view)
+
+        await interaction.response.send_message("Staff panels posted successfully.", ephemeral=True)
+
+
+class SetNickReviewModal(discord.ui.Modal, title="Set Nickname Review Channel"):
+    review_channel: discord.ui.TextInput["SetNickReviewModal"] = discord.ui.TextInput(
+        label="Channel mention or ID",
+        style=discord.TextStyle.short,
+        required=True,
+        placeholder="Enter a channel mention like #name or the channel ID",
+        max_length=100,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This must be used inside a server.", ephemeral=True)
+            return
+
+        channel = _parse_channel_reference(interaction.guild, self.review_channel.value)
+        if channel is None:
+            await interaction.response.send_message(
+                "Please enter a valid text channel mention or channel ID.",
+                ephemeral=True,
+            )
+            return
+
+        global _nick_config
+        _nick_config = {
+            "review_channel_id": channel.id,
+            "guild_id": interaction.guild.id,
+        }
+        save_nick_config(_nick_config)
+
+        await interaction.response.send_message(
+            f"Nickname review channel is now set to {channel.mention}.",
+            ephemeral=True,
+        )
+
+
+class CommentPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _reply(self, interaction: discord.Interaction, message: str) -> None:
+        await _reply_ephemeral(interaction, message)
+
+    # Management actions
+    @discord.ui.button(label="Stats Setup", style=discord.ButtonStyle.primary, custom_id="comment_panel:setupstats", emoji="📊", row=0)
+    async def setupstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not _interaction_is_authorized(interaction):
+            await self._reply(interaction, "You must be staff or an admin to use this button.")
+            return
+
+        if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
+            await self._reply(interaction, "This button must be used in a server text channel.")
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            guild = interaction.guild
+            overwrites = _stat_channel_overwrites(guild)
+            count = _guild_member_count(guild)
+            status_message = await interaction.channel.send(f"Creating **{STATS_CATEGORY_NAME}**…")
+            category = await guild.create_category(
+                name=STATS_CATEGORY_NAME,
+                overwrites=overwrites,
+                reason="Stats bot setup — stats category",
+            )
+            stats_channel = await guild.create_voice_channel(
+                name=_stats_channel_name(count),
+                category=category,
+                overwrites=overwrites,
+                reason="Stats bot setup — server stats",
+            )
+            await stats_channel.edit(status=_stats_channel_status(), reason="Stats bot setup — clock status")
             try:
-                await review_channel.send(embed=embed2, view=review_view)
-            except Exception as exc:
-                await self._reply(interaction, f"Failed to send review panel to channel B: {exc}")
-                return
+                await category.edit(position=0)
+            except discord.HTTPException:
+                pass
+            global _stats_config, _last_member_count, _last_stats_status
+            _stats_config = {
+                "guild_id": guild.id,
+                "category_id": category.id,
+                "stats_channel_id": stats_channel.id,
+            }
+            save_stats_config(_stats_config)
+            _last_member_count = count
+            _last_stats_status = _stats_channel_status()
+            embed = discord.Embed(
+                title=f"{STATS_CATEGORY_NAME} — ready",
+                description=(
+                    f"Category: **{category.name}**\n"
+                    f"Stats channel: {stats_channel.mention}\n"
+                    f"• **Name:** member count\n"
+                    f"• **Status:** rotating world clock\n\n"
+                    "Channel is locked — display only."
+                ),
+                color=discord.Color.green(),
+            )
+            await status_message.edit(content=None, embed=embed)
+            await interaction.followup.send("Stats setup completed.", ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(f"Stats setup failed: {exc}", ephemeral=True)
 
-        await self._reply(interaction, "Posted staff panels automatically.")
+    @discord.ui.button(label="Staff App", style=discord.ButtonStyle.primary, custom_id="comment_panel:setupstaffapp", emoji="🧑‍💼", row=0)
+    async def setupstaffapp_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not _interaction_is_authorized(interaction):
+            await self._reply(interaction, "You must be staff or an admin to use this button.")
+            return
 
-    @discord.ui.button(label="?refreshstats", style=discord.ButtonStyle.secondary, custom_id="commands_panel:refreshstats", row=0)
+        await interaction.response.defer(ephemeral=True)
+        staff_channel = bot.get_channel(STAFF_APP_CHANNEL_ID)
+        if not isinstance(staff_channel, discord.TextChannel):
+            await interaction.followup.send("The staff application channel is not configured or available.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="STAFF APPLICATION",
+            description=(
+                "We’re looking for active, respectful, and dedicated members to join our staff team. "
+                "If you enjoy helping others, keeping the community safe, and contributing to a positive environment, "
+                "this is your chance to apply."
+            ),
+            color=discord.Color.red(),
+        )
+        embed.add_field(
+            name="Why apply?",
+            value=(
+                "• Exclusive staff role\n"
+                "• Experience & teamwork\n"
+                "• Support the community"
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Press Apply to send your staff application.")
+
+        view = StaffAppView(bot)
+        try:
+            message = await staff_channel.send(embed=embed, view=view)
+            bot.add_view(view, message_id=message.id)
+            await interaction.followup.send("Staff application panel created.", ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(f"Failed to create staff application panel: {exc}", ephemeral=True)
+
+    @discord.ui.button(label="Refresh Stats", style=discord.ButtonStyle.success, custom_id="comment_panel:refreshstats", emoji="🔄", row=0)
     async def refreshstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not self._is_authorized(interaction):
+        if not _interaction_is_authorized(interaction):
             await self._reply(interaction, "You must be staff or an admin to use this button.")
             return
 
-        if interaction.guild is None:
-            await self._reply(interaction, "This button must be pressed in a server channel.")
-            return
-
+        await interaction.response.defer(ephemeral=True)
         await refresh_all_stats(force_members=True)
-        await self._reply(interaction, "Stats refreshed automatically.")
+        await interaction.followup.send("Stats refreshed.", ephemeral=True)
 
-    @discord.ui.button(label="?restartvoicelounge", style=discord.ButtonStyle.secondary, custom_id="commands_panel:restartvoicelounge", row=1)
-    async def restartvoicelounge_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    # Moderation buttons
+    @discord.ui.button(label="Send Notice", style=discord.ButtonStyle.danger, custom_id="comment_panel:sendnotice", emoji="📩", row=1)
+    async def sendnotice_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not self._is_authorized(interaction):
+        if not _interaction_is_authorized(interaction):
             await self._reply(interaction, "You must be staff or an admin to use this button.")
             return
 
         if interaction.guild is None:
-            await self._reply(interaction, "This button must be pressed in a server channel.")
+            await self._reply(interaction, "This button must be used in a server.")
             return
 
+        await interaction.response.defer(ephemeral=True)
+        try:
+            sent, failed = await _dispatch_not_verify_message(interaction.guild, None)
+            await interaction.followup.send(f"Default notice sent to {sent} members. Failed: {failed}.", ephemeral=True)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(f"Failed to send notice: {exc}", ephemeral=True)
+
+    @discord.ui.button(label="Custom Notice", style=discord.ButtonStyle.primary, custom_id="comment_panel:customnotice", emoji="✉️", row=1)
+    async def customnotice_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not _interaction_is_authorized(interaction):
+            await self._reply(interaction, "You must be staff or an admin to use this button.")
+            return
+
+        await interaction.response.send_modal(SendNotVerifyModal())
+
+    @discord.ui.button(label="Staff Panels", style=discord.ButtonStyle.secondary, custom_id="comment_panel:poststaffpanels", emoji="📝", row=1)
+    async def poststaffpanels_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not _interaction_is_authorized(interaction):
+            await self._reply(interaction, "You must be staff or an admin to use this button.")
+            return
+
+        await interaction.response.send_modal(PostStaffPanelsModal())
+
+    # Utility buttons
+    @discord.ui.button(label="Restart Lounge", style=discord.ButtonStyle.danger, custom_id="comment_panel:restartlounge", emoji="🔁", row=2)
+    async def restartlounge_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not _interaction_is_authorized(interaction):
+            await self._reply(interaction, "You must be staff or an admin to use this button.")
+            return
+
+        if interaction.guild is None:
+            await self._reply(interaction, "This button must be used in a server.")
+            return
+
+        await interaction.response.defer(ephemeral=True)
         await _disconnect_guild_voice_client(interaction.guild)
         await _join_voice_lounge()
-        await self._reply(interaction, "Voice lounge restart requested automatically.")
+        await interaction.followup.send("Voice lounge restart requested.", ephemeral=True)
 
-    @discord.ui.button(label="?ping", style=discord.ButtonStyle.secondary, custom_id="commands_panel:ping", row=1)
+    @discord.ui.button(label="Who Reviews", style=discord.ButtonStyle.secondary, custom_id="comment_panel:getnickreview", emoji="🔎", row=2)
+    async def getnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not _interaction_is_authorized(interaction):
+            await self._reply(interaction, "You must be staff or an admin to use this button.")
+            return
+
+        if interaction.guild is None:
+            await self._reply(interaction, "This button must be used in a server.")
+            return
+
+        saved_id = _nick_config.get("review_channel_id")
+        if not saved_id:
+            await self._reply(interaction, "No nickname review channel is configured.")
+            return
+
+        channel = interaction.guild.get_channel(int(saved_id))
+        if isinstance(channel, discord.TextChannel):
+            await self._reply(interaction, f"Current review channel: {channel.mention}")
+        else:
+            await self._reply(interaction, "The configured review channel is not available in this server.")
+
+    @discord.ui.button(label="Ping", style=discord.ButtonStyle.secondary, custom_id="comment_panel:ping", emoji="📡", row=2)
     async def ping_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        await self._reply(
-            interaction,
-            f"?ping — Pong! Current latency is {round(bot.latency * 1000)}ms.",
-        )
+        await self._reply(interaction, f"Pong! Current latency is {round(bot.latency * 1000)}ms.")
 
-    @discord.ui.button(label="?changename", style=discord.ButtonStyle.secondary, custom_id="commands_panel:changename", row=1)
+    # Nickname & review buttons
+    @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.success, custom_id="comment_panel:changename", emoji="✏️", row=3)
     async def changename_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        await self._reply(
-            interaction,
-            "?changename <new_nick> — Change your own nickname in the server. Use the command text directly for this action.",
-        )
+        if interaction.guild is None:
+            await self._reply(interaction, "This button must be used in a server.")
+            return
 
-    @discord.ui.button(label="?setupnick", style=discord.ButtonStyle.secondary, custom_id="commands_panel:setupnick", row=1)
+        await interaction.response.send_modal(NicknameRequestModal(requester=interaction.user, admin_channel=None))
+
+    @discord.ui.button(label="Nickname Panel", style=discord.ButtonStyle.secondary, custom_id="comment_panel:setupnick", emoji="🧾", row=3)
     async def setupnick_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not self._is_authorized(interaction):
+        if not _interaction_is_authorized(interaction):
             await self._reply(interaction, "You must be staff or an admin to use this button.")
+            return
+
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await self._reply(interaction, "This button must be used in a server text channel.")
             return
 
         view = NicknameRequestView(admin_channel=None)
@@ -1129,82 +1382,80 @@ class CommandsPanelView(discord.ui.View):
             title="Nickname Request",
             description=(
                 "Use the button below to request a nickname change.\n\n"
-                "Please make sure your nickname follows the server rules:\n"
-                "• Must be appropriate and respectful\n"
-                "• No offensive, abusive, or explicit language\n"
-                "• No impersonation of members or staff\n"
-                "• Keep it readable and avoid excessive symbols\n"
-                "• Follow all community rules\n\n"
-                "Requests that break the rules will be rejected."
+                "Rule reminders:\n"
+                "• Keep nicknames appropriate and respectful\n"
+                "• Do not impersonate staff or members\n"
+                "• Avoid offensive or explicit text\n"
+                "• Keep it readable and rule-compliant"
             ),
             color=discord.Color.blurple(),
         )
-        if isinstance(interaction.channel, discord.TextChannel):
-            await interaction.channel.send(embed=embed, view=view)
-            await self._reply(interaction, "Nickname request panel posted automatically.")
-        else:
-            await self._reply(interaction, "This button must be pressed in a text channel.")
+        await interaction.channel.send(embed=embed, view=view)
+        await self._reply(interaction, "Nickname request panel posted.")
 
-    @discord.ui.button(label="?setnickreview", style=discord.ButtonStyle.secondary, custom_id="commands_panel:setnickreview", row=2)
+    @discord.ui.button(label="Set Review", style=discord.ButtonStyle.secondary, custom_id="comment_panel:setnickreview", emoji="⚙️", row=3)
     async def setnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not self._is_authorized(interaction):
+        if not _interaction_is_authorized(interaction):
             await self._reply(interaction, "You must be staff or an admin to use this button.")
             return
 
-        await self._reply(
-            interaction,
-            "?setnickreview #channel — This command requires a target channel, so please run it manually in chat.",
-        )
-
-    @discord.ui.button(label="?getnickreview", style=discord.ButtonStyle.secondary, custom_id="commands_panel:getnickreview", row=2)
-    async def getnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if not self._is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
-
-        if interaction.guild is None:
-            await self._reply(interaction, "This button must be pressed in a server channel.")
-            return
-
-        saved_id = _nick_config.get("review_channel_id")
-        if not saved_id:
-            await self._reply(interaction, "No nickname review channel is currently configured.")
-            return
-
-        channel = interaction.guild.get_channel(int(saved_id))
-        if isinstance(channel, discord.TextChannel):
-            await self._reply(interaction, f"Configured review channel: {channel.mention}")
-        else:
-            await self._reply(interaction, "Configured review channel is not available in this server.")
+        await interaction.response.send_modal(SetNickReviewModal())
 
 
-@bot.command(name="setupcommandspanel")
+@bot.command(name="setupcommandspanel", aliases=["setupcommentpanel"])
 @commands.guild_only()
 @commands.check(_can_manage_bot)
 async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
     """Post a large commands panel in the current channel."""
     embed = discord.Embed(
-        title="Bot Commands Panel",
+        title="Server Control Panel",
         description=(
-            "This panel shows the available bot commands and what they do. "
-            "Click a button below to see more details about each command."
+            "A polished dashboard for managing server tools and bot actions.\n"
+            "Click a button to run an action, or fill out the form when more details are needed."
         ),
-        color=discord.Color.gold(),
+        color=discord.Color.blurple(),
     )
 
     embed.add_field(
-        name="Commands Panel",
+        name="How to use",
         value=(
-            "Use the buttons below to view command help. "
-            "Each button displays a short explanation of what the command does."
+            "• Click a button to execute the action directly.\n"
+            "• Buttons that require extra details will open a popup form.\n"
+            "• Protected buttons require staff/admin access."
         ),
         inline=False,
     )
-    embed.set_footer(text="Use ?setupcommandspanel to recreate this panel.")
+    embed.add_field(
+        name="Management",
+        value=(
+            "📊 Setup stats channel\n"
+            "🧑‍💼 Create staff application panel\n"
+            "🔄 Refresh server stats"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Moderation",
+        value=(
+            "📩 Send notice to role members\n"
+            "✉️ Send a custom role notice\n"
+            "📝 Post staff application review panels"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Utility",
+        value=(
+            "🔁 Restart voice lounge\n"
+            "📡 Check bot latency\n"
+            "✏️ Open nickname request tools"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Modern Discord-style control panel · Staff/Admin only")
 
-    view = CommandsPanelView()
+    view = CommentPanelView()
     await ctx.send(embed=embed, view=view)
 
 
