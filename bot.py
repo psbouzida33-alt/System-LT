@@ -744,33 +744,31 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
         except Exception as exc:
             print(f"[staff apply] initial response failed: {exc}")
 
+        try:
+            # Check bot permissions in the staff channel before sending
             try:
-                # Check bot permissions in the staff channel before sending
-                try:
-                    guild = interaction.guild
-                    bot_member = guild.me if guild is not None else None
-                    if isinstance(staff_channel, discord.TextChannel) and bot_member is not None:
-                        perms = staff_channel.permissions_for(bot_member)
-                        if not perms.send_messages or not perms.embed_links:
-                            print(f"[staff apply] missing send/embed permissions in channel {staff_channel.id}")
-                            return
-                except Exception as perm_exc:
-                    print(f"[staff apply] permission check failed: {perm_exc}")
+                guild = interaction.guild
+                bot_member = guild.me if guild is not None else None
+                if isinstance(staff_channel, discord.TextChannel) and bot_member is not None:
+                    perms = staff_channel.permissions_for(bot_member)
+                    if not perms.send_messages or not perms.embed_links:
+                        print(f"[staff apply] missing send/embed permissions in channel {staff_channel.id}")
+                        return
+            except Exception as perm_exc:
+                print(f"[staff apply] permission check failed: {perm_exc}")
 
-                # Send application to the configured staff channel
-                await staff_channel.send(embed=embed, view=review_view)
+            # Send application to the configured staff channel
+            await staff_channel.send(embed=embed, view=review_view)
 
-                # Also post the review panel to the pick-a-new-staff channel (staff pick)
-                try:
-                    pick_channel = interaction.client.get_channel(STAFF_PICK_CHANNEL_ID)
-                    if isinstance(pick_channel, discord.TextChannel):
-                        await pick_channel.send(embed=embed, view=review_view)
-                    else:
-                        print(f"[staff apply] pick channel {STAFF_PICK_CHANNEL_ID} not found or not a text channel")
-                except Exception as pick_exc:
-                    print(f"[staff apply] failed to send to pick channel: {pick_exc}")
-            except Exception as exc:
-                print(f"[staff apply] failed to send application to staff channel: {exc}")
+            # Also post the review panel to the pick-a-new-staff channel (staff pick)
+            try:
+                pick_channel = interaction.client.get_channel(STAFF_PICK_CHANNEL_ID)
+                if isinstance(pick_channel, discord.TextChannel):
+                    await pick_channel.send(embed=embed, view=review_view)
+                else:
+                    print(f"[staff apply] pick channel {STAFF_PICK_CHANNEL_ID} not found or not a text channel")
+            except Exception as pick_exc:
+                print(f"[staff apply] failed to send to pick channel: {pick_exc}")
         except Exception as exc:
             print(f"[staff apply] failed to send application to staff channel: {exc}")
 
