@@ -1058,7 +1058,9 @@ class ChangeNameModal(discord.ui.Modal, title="Change Your Nickname"):
                 change_name_cmd,
                 new_nick=self.new_nick.value,
             )
-            await interaction.followup.send("Nickname change command executed.", ephemeral=True)
+            await interaction.followup.send("?changename executed.", ephemeral=True)
+        except PermissionError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
         except Exception as exc:
             await interaction.followup.send(f"Failed to change nickname: {exc}", ephemeral=True)
 
@@ -1087,7 +1089,9 @@ class SendNotVerifyModal(discord.ui.Modal, title="Send Not-Verify Notice"):
                 send_not_verify_cmd,
                 custom_message=self.custom_message.value,
             )
-            await interaction.followup.send("Custom notice command executed.", ephemeral=True)
+            await interaction.followup.send("?sendnotverify executed.", ephemeral=True)
+        except PermissionError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
         except Exception as exc:
             await interaction.followup.send(f"Failed to send custom notice: {exc}", ephemeral=True)
 
@@ -1124,7 +1128,9 @@ class PostStaffPanelsModal(discord.ui.Modal, title="Post Staff Panels"):
                 post_staff_panels_cmd,
                 member=member,
             )
-            await interaction.followup.send("Staff panels command executed.", ephemeral=True)
+            await interaction.followup.send("?poststaffpanels executed.", ephemeral=True)
+        except PermissionError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
         except Exception as exc:
             await interaction.followup.send(f"Failed to post staff panels: {exc}", ephemeral=True)
 
@@ -1159,9 +1165,11 @@ class SetNickReviewModal(discord.ui.Modal, title="Set Nickname Review Channel"):
                 channel,
             )
             await interaction.followup.send(
-                f"Nickname review channel command executed for {channel.mention}.",
+                f"?setnickreview executed for {channel.mention}.",
                 ephemeral=True,
             )
+        except PermissionError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
         except Exception as exc:
             await interaction.followup.send(f"Failed to set review channel: {exc}", ephemeral=True)
 
@@ -1194,6 +1202,13 @@ class _CommandContextProxy:
         return message
 
 
+def _interaction_has_manage_guild(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        return False
+    author = interaction.user
+    return author.guild_permissions.manage_guild or author.id in ADMIN_USER_IDS
+
+
 async def _invoke_existing_command(
     interaction: discord.Interaction,
     command_callback: Any,
@@ -1201,7 +1216,17 @@ async def _invoke_existing_command(
     **kwargs: Any,
 ) -> Any:
     ctx = _CommandContextProxy(interaction)
-    return await command_callback(ctx, *args, **kwargs)
+    try:
+        if isinstance(command_callback, commands.Command):
+            return await command_callback.invoke(ctx, *args, **kwargs)
+        return await command_callback(ctx, *args, **kwargs)
+    except commands.MissingPermissions as exc:
+        missing = ", ".join(exc.missing_permissions) if exc.missing_permissions else "required permissions"
+        raise PermissionError(f"You need **{missing}** for this command.") from exc
+    except commands.CheckFailure as exc:
+        raise PermissionError("You are not allowed to run this command.") from exc
+    except commands.MissingRequiredArgument as exc:
+        raise ValueError(f"Missing required argument: {exc.param.name}") from exc
 
 
 class CommentPanelView(discord.ui.View):
@@ -1211,185 +1236,165 @@ class CommentPanelView(discord.ui.View):
     async def _reply(self, interaction: discord.Interaction, message: str) -> None:
         await _reply_ephemeral(interaction, message)
 
-    # Management actions
-    @discord.ui.button(label="Post Panel", style=discord.ButtonStyle.secondary, custom_id="comment_panel:postpanel", emoji="📋", row=0)
-    async def postpanel_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
+    async def _run_command(
+        self,
+        interaction: discord.Interaction,
+        command: Any,
+        *,
+        require_auth: bool = False,
+        require_manage_guild: bool = False,
+        require_guild: bool = False,
+        require_text_channel: bool = False,
+        success_message: str | None = None,
+        **command_kwargs: Any,
+    ) -> None:
+        if require_guild and interaction.guild is None:
+            await self._reply(interaction, "This button must be used in a server.")
             return
-
-        if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
+        if require_text_channel and not isinstance(interaction.channel, discord.TextChannel):
             await self._reply(interaction, "This button must be used in a server text channel.")
             return
-
-        await interaction.response.defer(ephemeral=True)
-        await _invoke_existing_command(interaction, setup_command_spanel_cmd)
-        await interaction.followup.send("Command panel posted.", ephemeral=True)
-
-    @discord.ui.button(label="Stats Setup", style=discord.ButtonStyle.primary, custom_id="comment_panel:setupstats", emoji="📊", row=0)
-    async def setupstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
-
-        if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
-            await self._reply(interaction, "This button must be used in a server text channel.")
-            return
+        if require_manage_guild:
+            if not _interaction_has_manage_guild(interaction):
+                await self._reply(interaction, "You need **Manage Server** permission for this button.")
+                return
+        elif require_auth:
+            if not _interaction_is_authorized(interaction):
+                await self._reply(interaction, "You must be staff or an admin to use this button.")
+                return
 
         await interaction.response.defer(ephemeral=True)
         try:
-            await _invoke_existing_command(interaction, setup_stats_cmd)
-            await interaction.followup.send("Stats setup completed.", ephemeral=True)
+            await _invoke_existing_command(interaction, command, **command_kwargs)
+            if success_message:
+                await interaction.followup.send(success_message, ephemeral=True)
+        except PermissionError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
         except Exception as exc:
-            await interaction.followup.send(f"Stats setup failed: {exc}", ephemeral=True)
+            await interaction.followup.send(f"Command failed: {exc}", ephemeral=True)
+
+    @discord.ui.button(label="?panel", style=discord.ButtonStyle.secondary, custom_id="comment_panel:postpanel", emoji="📋", row=0)
+    async def postpanel_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._run_command(
+            interaction,
+            setup_command_spanel_cmd,
+            require_auth=True,
+            require_guild=True,
+            require_text_channel=True,
+            success_message="?panel executed — command panel posted.",
+        )
+
+    @discord.ui.button(label="?setupstats", style=discord.ButtonStyle.primary, custom_id="comment_panel:setupstats", emoji="📊", row=0)
+    async def setupstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._run_command(
+            interaction,
+            setup_stats_cmd,
+            require_auth=True,
+            require_guild=True,
+            require_text_channel=True,
+            success_message="?setupstats executed.",
+        )
 
     @discord.ui.button(label="?setupstaffapp", style=discord.ButtonStyle.primary, custom_id="comment_panel:setupstaffapp", emoji="🧑‍💼", row=0)
     async def setupstaffapp_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+        await self._run_command(
+            interaction,
+            setup_staff_app_cmd,
+            require_manage_guild=True,
+            success_message="?setupstaffapp executed.",
+        )
 
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await _invoke_existing_command(interaction, setup_staff_app_cmd)
-            await interaction.followup.send("Staff application panel created.", ephemeral=True)
-        except Exception as exc:
-            await interaction.followup.send(f"Failed to create staff application panel: {exc}", ephemeral=True)
-
-    @discord.ui.button(label="Refresh Stats", style=discord.ButtonStyle.success, custom_id="comment_panel:refreshstats", emoji="🔄", row=0)
+    @discord.ui.button(label="?refreshstats", style=discord.ButtonStyle.success, custom_id="comment_panel:refreshstats", emoji="🔄", row=0)
     async def refreshstats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+        await self._run_command(
+            interaction,
+            refresh_stats_cmd,
+            require_auth=True,
+            success_message="?refreshstats executed.",
+        )
 
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await _invoke_existing_command(interaction, refresh_stats_cmd)
-            await interaction.followup.send("Stats refreshed.", ephemeral=True)
-        except Exception as exc:
-            await interaction.followup.send(f"Failed to refresh stats: {exc}", ephemeral=True)
-
-    # Moderation buttons
-    @discord.ui.button(label="Send Notice", style=discord.ButtonStyle.danger, custom_id="comment_panel:sendnotice", emoji="📩", row=1)
+    @discord.ui.button(label="?sendnotverify", style=discord.ButtonStyle.danger, custom_id="comment_panel:sendnotice", emoji="📩", row=1)
     async def sendnotice_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+        await self._run_command(
+            interaction,
+            send_not_verify_cmd,
+            require_auth=True,
+            require_guild=True,
+            success_message="?sendnotverify executed.",
+        )
 
-        if interaction.guild is None:
-            await self._reply(interaction, "This button must be used in a server.")
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await _invoke_existing_command(interaction, send_not_verify_cmd)
-            await interaction.followup.send("Default notice command executed.", ephemeral=True)
-        except Exception as exc:
-            await interaction.followup.send(f"Failed to send notice: {exc}", ephemeral=True)
-
-    @discord.ui.button(label="Custom Notice", style=discord.ButtonStyle.primary, custom_id="comment_panel:customnotice", emoji="✉️", row=1)
+    @discord.ui.button(label="?sendnotverify msg", style=discord.ButtonStyle.primary, custom_id="comment_panel:customnotice", emoji="✉️", row=1)
     async def customnotice_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         if not _interaction_is_authorized(interaction):
             await self._reply(interaction, "You must be staff or an admin to use this button.")
             return
-
         await interaction.response.send_modal(SendNotVerifyModal())
 
-    @discord.ui.button(label="Staff Panels", style=discord.ButtonStyle.secondary, custom_id="comment_panel:poststaffpanels", emoji="📝", row=1)
+    @discord.ui.button(label="?poststaffpanels", style=discord.ButtonStyle.secondary, custom_id="comment_panel:poststaffpanels", emoji="📝", row=1)
     async def poststaffpanels_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
+        if not _interaction_has_manage_guild(interaction):
+            await self._reply(interaction, "You need **Manage Server** permission for this button.")
             return
-
         await interaction.response.send_modal(PostStaffPanelsModal())
 
-    # Utility buttons
-    @discord.ui.button(label="Restart Lounge", style=discord.ButtonStyle.danger, custom_id="comment_panel:restartlounge", emoji="🔁", row=2)
+    @discord.ui.button(label="?restartvoicelounge", style=discord.ButtonStyle.danger, custom_id="comment_panel:restartlounge", emoji="🔁", row=2)
     async def restartlounge_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+        await self._run_command(
+            interaction,
+            restart_voice_lounge_cmd,
+            require_auth=True,
+            require_guild=True,
+            success_message="?restartvoicelounge executed.",
+        )
 
-        if interaction.guild is None:
-            await self._reply(interaction, "This button must be used in a server.")
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await _invoke_existing_command(interaction, restart_voice_lounge_cmd)
-            await interaction.followup.send("Voice lounge restart requested.", ephemeral=True)
-        except Exception as exc:
-            await interaction.followup.send(f"Failed to restart voice lounge: {exc}", ephemeral=True)
-
-    @discord.ui.button(label="Who Reviews", style=discord.ButtonStyle.secondary, custom_id="comment_panel:getnickreview", emoji="🔎", row=2)
+    @discord.ui.button(label="?getnickreview", style=discord.ButtonStyle.secondary, custom_id="comment_panel:getnickreview", emoji="🔎", row=2)
     async def getnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+        await self._run_command(
+            interaction,
+            get_nick_review_cmd,
+            require_auth=True,
+            require_guild=True,
+        )
 
-        if interaction.guild is None:
-            await self._reply(interaction, "This button must be used in a server.")
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await _invoke_existing_command(interaction, get_nick_review_cmd)
-        except Exception as exc:
-            await interaction.followup.send(f"Failed to check review channel: {exc}", ephemeral=True)
-
-    @discord.ui.button(label="Ping", style=discord.ButtonStyle.secondary, custom_id="comment_panel:ping", emoji="📡", row=2)
+    @discord.ui.button(label="?ping", style=discord.ButtonStyle.secondary, custom_id="comment_panel:ping", emoji="📡", row=2)
     async def ping_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await _invoke_existing_command(interaction, ping_cmd)
-        except Exception as exc:
-            await interaction.followup.send(f"Failed to run ping: {exc}", ephemeral=True)
+        await self._run_command(interaction, ping_cmd)
 
-    # Nickname & review buttons
-    @discord.ui.button(label="Change Nickname", style=discord.ButtonStyle.success, custom_id="comment_panel:changename", emoji="✏️", row=3)
+    @discord.ui.button(label="?changename", style=discord.ButtonStyle.success, custom_id="comment_panel:changename", emoji="✏️", row=3)
     async def changename_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         if interaction.guild is None:
             await self._reply(interaction, "This button must be used in a server.")
             return
-
         await interaction.response.send_modal(ChangeNameModal())
 
-    @discord.ui.button(label="Nickname Panel", style=discord.ButtonStyle.secondary, custom_id="comment_panel:setupnick", emoji="🧾", row=3)
+    @discord.ui.button(label="?setupnick", style=discord.ButtonStyle.secondary, custom_id="comment_panel:setupnick", emoji="🧾", row=3)
     async def setupnick_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        if not _interaction_is_authorized(interaction):
-            await self._reply(interaction, "You must be staff or an admin to use this button.")
-            return
+        await self._run_command(
+            interaction,
+            setup_nick_cmd,
+            require_auth=True,
+            require_text_channel=True,
+            success_message="?setupnick executed.",
+        )
 
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await self._reply(interaction, "This button must be used in a server text channel.")
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await _invoke_existing_command(interaction, setup_nick_cmd)
-            await interaction.followup.send("Nickname request panel posted.", ephemeral=True)
-        except Exception as exc:
-            await interaction.followup.send(f"Failed to post nickname panel: {exc}", ephemeral=True)
-
-    @discord.ui.button(label="Set Review", style=discord.ButtonStyle.secondary, custom_id="comment_panel:setnickreview", emoji="⚙️", row=3)
+    @discord.ui.button(label="?setnickreview", style=discord.ButtonStyle.secondary, custom_id="comment_panel:setnickreview", emoji="⚙️", row=3)
     async def setnickreview_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         if not _interaction_is_authorized(interaction):
             await self._reply(interaction, "You must be staff or an admin to use this button.")
             return
-
         await interaction.response.send_modal(SetNickReviewModal())
 
 
@@ -1401,8 +1406,8 @@ async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
     embed = discord.Embed(
         title="Server Control Panel",
         description=(
-            "A polished dashboard for managing server tools and bot actions.\n"
-            "Click a button to run an action, or fill out the form when more details are needed."
+            "Each button runs an existing bot command (shortcut only).\n"
+            "Click a button to execute `?command`, or fill out the form when extra details are needed."
         ),
         color=discord.Color.blurple(),
     )
@@ -1410,8 +1415,8 @@ async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
     embed.add_field(
         name="How to use",
         value=(
-            "• Click a button to execute the action directly.\n"
-            "• Buttons that require extra details will open a popup form.\n"
+            "• Each button label shows the exact command it runs.\n"
+            "• Buttons that need extra details open a popup form first.\n"
             "• Protected buttons require staff/admin access."
         ),
         inline=False,
@@ -1419,27 +1424,21 @@ async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
     embed.add_field(
         name="Management",
         value=(
-            "📊 Setup stats channel\n"
-            "🧑‍💼 Create staff application panel\n"
-            "🔄 Refresh server stats"
+            "`?panel` · `?setupstats` · `?setupstaffapp` · `?refreshstats`"
         ),
         inline=False,
     )
     embed.add_field(
         name="Moderation",
         value=(
-            "📩 Send notice to role members\n"
-            "✉️ Send a custom role notice\n"
-            "📝 Post staff application review panels"
+            "`?sendnotverify` · `?sendnotverify msg` · `?poststaffpanels`"
         ),
         inline=False,
     )
     embed.add_field(
         name="Utility",
         value=(
-            "🔁 Restart voice lounge\n"
-            "📡 Check bot latency\n"
-            "✏️ Open nickname request tools"
+            "`?restartvoicelounge` · `?getnickreview` · `?ping` · `?changename` · `?setupnick` · `?setnickreview`"
         ),
         inline=False,
     )
