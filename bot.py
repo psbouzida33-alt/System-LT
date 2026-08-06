@@ -4,6 +4,7 @@ Updates locked voice channels: member count + live clock.
 """
 import asyncio
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -53,6 +54,13 @@ class StatsBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.add_view(NicknameRequestView())
         self.add_view(StaffAppView(self))
+        self.add_view(
+            StaffApplicationReviewView(
+                applicant_id=0,
+                applicant_name="",
+                applicant_mention="",
+            )
+        )
         self.add_view(CommentPanelView())
 
 
@@ -661,6 +669,45 @@ async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
         await status.edit(content=f"Setup failed: {exc}")
 
 
+async def _get_configured_text_channel(
+    interaction: discord.Interaction,
+    channel_id: int,
+) -> discord.TextChannel | None:
+    """Resolve a configured channel from cache or the API."""
+    client = interaction.client
+    channel = client.get_channel(channel_id)
+    if isinstance(channel, discord.TextChannel):
+        return channel
+
+    guild = interaction.guild
+    if guild is not None:
+        guild_channel = guild.get_channel(channel_id)
+        if isinstance(guild_channel, discord.TextChannel):
+            return guild_channel
+
+    try:
+        fetched = await client.fetch_channel(channel_id)
+    except (discord.HTTPException, discord.NotFound):
+        return None
+    return fetched if isinstance(fetched, discord.TextChannel) else None
+
+
+def _parse_applicant_from_embed(embed: discord.Embed) -> tuple[int, str, str] | None:
+    for field in embed.fields:
+        if field.name != "Applicant":
+            continue
+        value = field.value or ""
+        id_match = re.search(r"\((\d+)\)\s*$", value)
+        if not id_match:
+            continue
+        applicant_id = int(id_match.group(1))
+        mention_match = re.search(r"<@!?(\d+)>", value)
+        applicant_mention = mention_match.group(0) if mention_match else f"<@{applicant_id}>"
+        applicant_name = value.split("(")[0].strip() or applicant_mention
+        return applicant_id, applicant_name, applicant_mention
+    return None
+
+
 def _build_staff_application_embed(interaction: discord.Interaction, *, answers: dict[str, str]) -> discord.Embed:
     embed = discord.Embed(
         title="New Staff Application",
@@ -691,29 +738,22 @@ def _build_staff_application_embed(interaction: discord.Interaction, *, answers:
 async def _publish_staff_application(
     interaction: discord.Interaction,
     *,
-    staff_channel: discord.TextChannel | None,
-    pick_channel: discord.TextChannel | None,
+    pick_channel: discord.TextChannel,
     answers: dict[str, str],
-) -> None:
-    if staff_channel is None:
-        await interaction.response.send_message(
-            "Staff application channel is not configured or could not be found.",
-            ephemeral=True,
-        )
-        return
-
+) -> bool:
+    """Publish a submitted application to pick-a-new-staff for staff review."""
     embed = _build_staff_application_embed(interaction, answers=answers)
 
-    # Do not send an ephemeral confirmation message in the channel.
-    # The application is published directly to the configured review channels.
     try:
         guild = interaction.guild
         bot_member = guild.me if guild is not None else None
-        if isinstance(staff_channel, discord.TextChannel) and bot_member is not None:
-            perms = staff_channel.permissions_for(bot_member)
+        if bot_member is not None:
+            perms = pick_channel.permissions_for(bot_member)
             if not perms.send_messages or not perms.embed_links:
-                print(f"[staff apply] missing send/embed permissions in channel {staff_channel.id}")
-                return
+                print(
+                    f"[staff apply] missing send/embed permissions in pick channel {pick_channel.id}"
+                )
+                return False
     except Exception as perm_exc:
         print(f"[staff apply] permission check failed: {perm_exc}")
 
@@ -723,23 +763,13 @@ async def _publish_staff_application(
         applicant_mention=interaction.user.mention,
     )
 
-    if isinstance(staff_channel, discord.TextChannel):
-        try:
-            staff_message = await staff_channel.send(embed=embed, view=review_view)
-            bot.add_view(review_view, message_id=staff_message.id)
-        except Exception as staff_exc:
-            print(f"[staff apply] failed to send to staff channel: {staff_exc}")
-    else:
-        print("[staff apply] staff channel is not configured or could not be found.")
-
-    if isinstance(pick_channel, discord.TextChannel):
-        try:
-            pick_message = await pick_channel.send(embed=embed, view=review_view)
-            bot.add_view(review_view, message_id=pick_message.id)
-        except Exception as pick_exc:
-            print(f"[staff apply] failed to send to pick channel: {pick_exc}")
-    else:
-        print("[staff apply] pick channel is not configured or could not be found.")
+    try:
+        pick_message = await pick_channel.send(embed=embed, view=review_view)
+        bot.add_view(review_view, message_id=pick_message.id)
+        return True
+    except Exception as pick_exc:
+        print(f"[staff apply] failed to send to pick channel: {pick_exc}")
+        return False
 
 
 class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
@@ -780,11 +810,10 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
     )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        staff_channel = interaction.client.get_channel(STAFF_APP_CHANNEL_ID)
-        pick_channel = interaction.client.get_channel(STAFF_PICK_CHANNEL_ID)
-        if not isinstance(staff_channel, discord.TextChannel):
+        pick_channel = await _get_configured_text_channel(interaction, STAFF_PICK_CHANNEL_ID)
+        if pick_channel is None:
             await interaction.response.send_message(
-                "Staff application channel is not configured or could not be found.",
+                "Staff review channel (pick-a-new-staff) is not configured or could not be found.",
                 ephemeral=True,
             )
             return
@@ -796,12 +825,23 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
             str(self.q4.label or "Question 4"): str(self.q4.value or ""),
             str(self.q5.label or "Question 5"): str(self.q5.value or ""),
         }
-        await _publish_staff_application(
+
+        await interaction.response.defer(ephemeral=True)
+        published = await _publish_staff_application(
             interaction,
-            staff_channel=staff_channel,
-            pick_channel=pick_channel if isinstance(pick_channel, discord.TextChannel) else None,
+            pick_channel=pick_channel,
             answers=answers,
         )
+        if published:
+            await interaction.followup.send(
+                "Your staff application was submitted successfully. Staff will review it soon.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "Could not submit your application right now. Please contact staff or try again later.",
+                ephemeral=True,
+            )
 
 class StaffApplicationReviewView(discord.ui.View):
     def __init__(self, applicant_id: int, applicant_name: str, applicant_mention: str):
@@ -809,6 +849,18 @@ class StaffApplicationReviewView(discord.ui.View):
         self.applicant_id = applicant_id
         self.applicant_name = applicant_name
         self.applicant_mention = applicant_mention
+
+    def _ensure_applicant(self, interaction: discord.Interaction) -> bool:
+        if self.applicant_id:
+            return True
+        message = interaction.message
+        if message is None or not message.embeds:
+            return False
+        parsed = _parse_applicant_from_embed(message.embeds[0])
+        if parsed is None:
+            return False
+        self.applicant_id, self.applicant_name, self.applicant_mention = parsed
+        return True
 
     async def _is_authorized(self, member: discord.Member | discord.User) -> bool:
         if not isinstance(member, discord.Member):
@@ -821,6 +873,9 @@ class StaffApplicationReviewView(discord.ui.View):
         )
 
     async def _finish_review(self, interaction: discord.Interaction, status: str) -> None:
+        if not self._ensure_applicant(interaction):
+            return
+
         for child in self.children:
             if isinstance(child, discord.ui.Button):
                 child.disabled = True
@@ -833,7 +888,7 @@ class StaffApplicationReviewView(discord.ui.View):
 
         try:
             guild = interaction.guild
-            if guild is not None:
+            if guild is not None and self.applicant_id:
                 member = guild.get_member(self.applicant_id)
                 if member is not None:
                     if status == "Accepted":
@@ -949,12 +1004,8 @@ async def post_staff_panels_cmd(ctx: commands.Context, member: discord.Member | 
 
     applicant_mention = member.mention if isinstance(member, discord.Member) else str(member or ctx.author)
 
-    # Channel IDs requested by the user:
-    channel_a_id = 1534583845884792874  # STAFF APPLICATION
-    channel_b_id = 1534586562447282258  # New Staff Application (review)
-
-    app_channel = bot.get_channel(channel_a_id)
-    review_channel = bot.get_channel(channel_b_id)
+    app_channel = bot.get_channel(STAFF_APP_CHANNEL_ID)
+    review_channel = bot.get_channel(STAFF_PICK_CHANNEL_ID)
 
     if isinstance(app_channel, discord.TextChannel):
         embed = discord.Embed(
@@ -970,9 +1021,10 @@ async def post_staff_panels_cmd(ctx: commands.Context, member: discord.Member | 
         embed.add_field(name="Applicant", value=applicant_mention, inline=False)
         view = StaffAppView(bot)
         try:
-            await app_channel.send(embed=embed, view=view)
+            panel_message = await app_channel.send(embed=embed, view=view)
+            bot.add_view(view, message_id=panel_message.id)
         except Exception as exc:
-            await ctx.send(f"Failed to send panel to channel A: {exc}")
+            await ctx.send(f"Failed to send panel to staff-app channel: {exc}")
 
     if isinstance(review_channel, discord.TextChannel):
         embed2 = discord.Embed(
@@ -988,9 +1040,10 @@ async def post_staff_panels_cmd(ctx: commands.Context, member: discord.Member | 
         embed2.add_field(name="Q3", value="—", inline=False)
         review_view = StaffApplicationReviewView(applicant_id=member.id if isinstance(member, discord.Member) else 0, applicant_name=str(member or ctx.author), applicant_mention=applicant_mention)
         try:
-            await review_channel.send(embed=embed2, view=review_view)
+            review_message = await review_channel.send(embed=embed2, view=review_view)
+            bot.add_view(review_view, message_id=review_message.id)
         except Exception as exc:
-            await ctx.send(f"Failed to send review panel to channel B: {exc}")
+            await ctx.send(f"Failed to send review to pick-a-new-staff channel: {exc}")
 
     await ctx.send("Posted staff panels.", delete_after=8)
 
