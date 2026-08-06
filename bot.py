@@ -827,12 +827,7 @@ class StaffApplicationReviewView(discord.ui.View):
         # can be None (for some types of interactions), so guard before calling
         # `.edit` to avoid runtime errors and satisfy static analysis.
         if interaction.message is not None:
-            if interaction.message.embeds:
-                embed = discord.Embed.from_dict(interaction.message.embeds[0].to_dict())
-                embed.add_field(name="Decision", value=f"{status} by {interaction.user.mention}", inline=False)
-                await interaction.message.edit(embed=embed, view=self)
-            else:
-                await interaction.message.edit(view=self)
+            await interaction.message.edit(view=self)
 
         try:
             guild = interaction.guild
