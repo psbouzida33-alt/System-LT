@@ -716,17 +716,6 @@ async def _publish_staff_application(
     except Exception as perm_exc:
         print(f"[staff apply] permission check failed: {perm_exc}")
 
-    try:
-        review_view = StaffApplicationReviewView(
-            applicant_id=interaction.user.id,
-            applicant_name=str(interaction.user),
-            applicant_mention=interaction.user.mention,
-        )
-        message = await staff_channel.send(embed=embed, view=review_view)
-        bot.add_view(review_view, message_id=message.id)
-    except Exception as exc:
-        print(f"[staff apply] failed to send application to staff channel: {exc}")
-
     if isinstance(pick_channel, discord.TextChannel):
         try:
             review_view = StaffApplicationReviewView(
@@ -738,6 +727,8 @@ async def _publish_staff_application(
             bot.add_view(review_view, message_id=message.id)
         except Exception as pick_exc:
             print(f"[staff apply] failed to send to pick channel: {pick_exc}")
+    else:
+        print("[staff apply] pick channel is not configured or could not be found.")
 
 
 class StaffApplicationModal(discord.ui.Modal, title="Staff Application Form"):
