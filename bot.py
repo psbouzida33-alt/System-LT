@@ -1810,43 +1810,29 @@ class NicknameRequestModal(discord.ui.Modal, title="Change Your Nickname"):
             await interaction.response.send_message("Nickname cannot be empty.", ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            "Your nickname request has been sent to the staff for review.",
-            ephemeral=True,
-        )
-
         if not isinstance(self.requester, discord.Member):
+            await interaction.response.send_message(
+                "Could not resolve your member profile.",
+                ephemeral=True,
+            )
             return
 
-        embed = discord.Embed(
-            title="Nickname change request",
-            description=(
-                f"User: {self.requester.mention}\n"
-                f"Requested nickname: **{requested}**"
-            ),
-            color=discord.Color.blue(),
-            timestamp=datetime.now(),
-        )
-        embed.set_footer(text=f"Requester ID: {self.requester.id}")
-
-        target = self.admin_channel
-        if target is None and interaction.guild:
-            saved_id = _nick_config.get("review_channel_id")
-            if saved_id:
-                saved_channel = interaction.guild.get_channel(int(saved_id))
-                if isinstance(saved_channel, discord.TextChannel):
-                    target = saved_channel
-
-        if target is None:
-            print("[nickname] no review channel configured; request not posted.")
-            return
-
-        view = AdminApproveView(requester_id=self.requester.id, requested_nick=requested)
         try:
-            message = await target.send(embed=embed, view=view)
-            bot.add_view(view, message_id=message.id)
+            await self.requester.edit(nick=requested, reason="Self-service nickname change")
+            await interaction.response.send_message(
+                f"Your nickname has been changed to **{requested}**.",
+                ephemeral=True,
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to change your nickname.",
+                ephemeral=True,
+            )
         except Exception as exc:
-            print(f"[nickname] failed to post request to review channel: {exc}")
+            await interaction.response.send_message(
+                f"Could not change your nickname: {exc}",
+                ephemeral=True,
+            )
 
 
 class NicknameRequestView(discord.ui.View):
