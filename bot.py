@@ -77,7 +77,6 @@ _last_member_count: int | None = None
 _last_stats_status: str | None = None
 _stats_config: dict[str, int | None] = load_stats_config()
 _nick_config: dict[str, int | None] = load_nick_config()
-_staff_view_registered = False
 
 ADMIN_USER_IDS = {1511828976732209252}
 STAFF_USER_IDS = {1517586424306598140}
@@ -109,38 +108,6 @@ def _stats_channel_status() -> str:
     emoji, label, tz_name = WORLD_CLOCKS[index]
     now = datetime.now(ZoneInfo(tz_name))
     return f"{emoji} {label}: {now.strftime('%H:%M:%S')}"
-
-
-def _extract_text_from_content(content_value: Any) -> str | None:
-    if isinstance(content_value, list):
-        parts: list[str] = []
-        for raw_item in cast(list[Any], content_value):
-            if isinstance(raw_item, dict):
-                raw_dict = cast(dict[str, Any], raw_item)
-                text_item = raw_dict.get("text") or raw_dict.get("content")
-                text = _extract_text_from_content(text_item)
-                if text:
-                    parts.append(text)
-            elif isinstance(raw_item, str):
-                parts.append(raw_item)
-        return "".join(parts).strip() if parts else None
-
-    if isinstance(content_value, dict):
-        content_dict = cast(dict[str, Any], content_value)
-        text_value = content_dict.get("text")
-        if isinstance(text_value, str):
-            return text_value.strip()
-        parts_value = content_dict.get("parts")
-        if isinstance(parts_value, list):
-            return _extract_text_from_content(parts_value)
-        content_item = content_dict.get("content")
-        return _extract_text_from_content(content_item)
-
-    if isinstance(content_value, str):
-        return content_value.strip()
-
-    return None
-
 
 
 def _stat_channel_overwrites(guild: discord.Guild) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
@@ -265,59 +232,6 @@ async def refresh_all_stats(*, force_members: bool = False) -> None:
     if guild is None:
         return
     await update_stats_channel(guild, force_members=force_members)
-
-
-class DummyVoiceClient(discord.VoiceProtocol):
-    """Join voice without audio — keeps the bot visible in the lounge channel."""
-
-    channel: discord.abc.Connectable
-
-    def __init__(self, client, channel: discord.abc.Connectable):
-        self.client = client
-        self.channel = channel
-        self._connected = False
-
-    async def connect(
-        self,
-        *,
-        timeout: float,
-        reconnect: bool,
-        self_deaf: bool = True,
-        self_mute: bool = True,
-    ) -> None:
-        # discord.py passes self_deaf=False by default — always join deafened + muted.
-        channel = cast(discord.abc.GuildChannel, self.channel)
-        await channel.guild.change_voice_state(
-            channel=channel,
-            self_deaf=True,
-            self_mute=True,
-        )
-        self._connected = True
-
-    async def disconnect(self, *, force: bool = False) -> None:
-        channel = cast(discord.abc.GuildChannel, self.channel)
-        await channel.guild.change_voice_state(channel=None)
-        self._connected = False
-        try:
-            key_id, _ = self.channel._get_voice_client_key()
-            self.client._connection._remove_voice_client(key_id)
-        except Exception:
-            pass
-
-    async def on_voice_state_update(self, data):
-        pass
-
-    async def on_voice_server_update(self, data):
-        pass
-
-    def is_connected(self):
-        return self._connected
-
-    def is_playing(self):
-        return False
-
-    def stop(self):
-        pass
 
 
 def _find_voice_lounge_channel() -> discord.VoiceChannel | None:
@@ -690,16 +604,25 @@ async def setup_stats_cmd(ctx: commands.Context[StatsBot]):
 
 
 async def _get_configured_text_channel(
-    interaction: discord.Interaction,
+    client_or_interaction: "discord.Client | discord.Interaction",
     channel_id: int,
+    guild: discord.Guild | None = None,
 ) -> discord.TextChannel | None:
-    """Resolve a configured channel from cache or the API."""
-    client = interaction.client
+    """Resolve a configured channel from cache or the API.
+
+    Accepts either a Client/Bot (pass `guild` separately, e.g. ctx.guild) or a
+    discord.Interaction (guild is read off it automatically).
+    """
+    if isinstance(client_or_interaction, discord.Interaction):
+        client = client_or_interaction.client
+        guild = guild or client_or_interaction.guild
+    else:
+        client = client_or_interaction
+
     channel = client.get_channel(channel_id)
     if isinstance(channel, discord.TextChannel):
         return channel
 
-    guild = interaction.guild
     if guild is not None:
         guild_channel = guild.get_channel(channel_id)
         if isinstance(guild_channel, discord.TextChannel):
@@ -1388,8 +1311,15 @@ async def _invoke_existing_command(
 ) -> Any:
     ctx = _panel_command_context(interaction)
     try:
+        # Command.invoke() only ever accepts `ctx` — it does not forward extra
+        # positional/keyword arguments. Calling it with args from a modal used
+        # to raise a TypeError and silently break those panel buttons. Calling
+        # the command's underlying .callback directly accepts normal args.
+        # Permission checks normally run inside invoke(); the panel already
+        # re-checks permissions via _panel_user_can_run()/require_* before
+        # ever reaching this point, so nothing is skipped.
         if isinstance(command_callback, commands.Command):
-            return await command_callback.invoke(ctx, *args, **kwargs)
+            return await command_callback.callback(ctx, *args, **kwargs)
         return await command_callback(ctx, *args, **kwargs)
     except commands.MissingPermissions as exc:
         missing = ", ".join(exc.missing_permissions) if exc.missing_permissions else "required permissions"
@@ -1440,8 +1370,7 @@ class CommentPanelView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         try:
             await _invoke_existing_command(interaction, command, **command_kwargs)
-            if success_message:
-                await interaction.followup.send(success_message, ephemeral=True)
+            await interaction.followup.send(success_message or "Done.", ephemeral=True)
         except PermissionError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
         except Exception as exc:
@@ -2064,7 +1993,7 @@ async def setup_nick_cmd(ctx: commands.Context[StatsBot], admin_channel: discord
     Usage: `?setupnick` to post in the configured panel channel, or
     `?setupnick #review` to also set the staff review channel for requests.
     """
-    panel_channel = await _get_configured_text_channel(bot, NICK_PANEL_CHANNEL_ID)
+    panel_channel = await _get_configured_text_channel(bot, NICK_PANEL_CHANNEL_ID, ctx.guild)
     if panel_channel is None:
         await ctx.send("Could not find the configured nickname panel channel.")
         return
