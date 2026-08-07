@@ -346,61 +346,12 @@ async def on_interaction(interaction: discord.Interaction) -> None:
         return
 
     custom_id = interaction.data.get("custom_id") if isinstance(interaction.data, dict) else None
-    if custom_id == "staff_app.apply":
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "This button can only be used inside a server.",
-                ephemeral=True,
-            )
-            return
-        try:
-            await interaction.response.send_modal(StaffApplicationModal())
-        except Exception as exc:
-            import traceback
 
-            print(f"[staff apply] failed to open modal: {exc}")
-            traceback.print_exc()
-            try:
-                await interaction.response.send_message(
-                    f"Unable to open the staff application form right now. Error: {type(exc).__name__}",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
-        return
-
-    if custom_id == "nickrequest:open":
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "This button can only be used inside a server.",
-                ephemeral=True,
-            )
-            return
-        admin_channel: discord.TextChannel | None = None
-        if interaction.guild:
-            saved_id = _nick_config.get("review_channel_id")
-            if saved_id:
-                saved_channel = interaction.guild.get_channel(int(saved_id))
-                if isinstance(saved_channel, discord.TextChannel):
-                    admin_channel = saved_channel
-
-        try:
-            await interaction.response.send_modal(
-                NicknameRequestModal(
-                    requester=interaction.user,
-                    admin_channel=admin_channel,
-                )
-            )
-        except Exception as exc:
-            print(f"[nickname] failed to open modal: {exc}")
-            try:
-                await interaction.response.send_message(
-                    "Unable to open nickname request modal right now. Please try again.",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
-        return
+    # NOTE: "staff_app.apply" and "nickrequest:open" are intentionally NOT handled
+    # here. Both buttons live on persistent views (StaffAppView, NicknameRequestView)
+    # registered via bot.add_view() at startup, which already dispatch to their own
+    # callbacks. Handling them again here raced against those callbacks and caused
+    # "Interaction has already been acknowledged" (400/40060) errors.
 
     if custom_id and custom_id.startswith("comment_panel:"):
         if await _handle_legacy_panel_interaction(interaction, custom_id):
