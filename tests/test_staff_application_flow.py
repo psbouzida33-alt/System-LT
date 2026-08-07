@@ -33,8 +33,10 @@ class DummyInteraction:
         self.client = types.SimpleNamespace(get_channel=lambda _id: self.channel)
         self.response = types.SimpleNamespace(
             send_message=AsyncMock(),
+            defer=AsyncMock(),
             is_done=lambda: False,
         )
+        self.followup = types.SimpleNamespace(send=AsyncMock())
 
 
 @pytest.mark.asyncio
@@ -54,16 +56,32 @@ async def test_publish_staff_application_posts_to_staff_and_pick_channels(monkey
     try:
         await bot._publish_staff_application(
             interaction,
-            staff_channel=staff_channel,
             pick_channel=pick_channel,
             answers={"Q1": "answer"},
         )
     finally:
         bot.bot.add_view = original_add_view
 
-    assert len(staff_channel.sent) == 1
+    assert len(staff_channel.sent) == 0
     assert len(pick_channel.sent) == 1
-    assert "embed" in staff_channel.sent[0]
-    assert "view" in staff_channel.sent[0]
     assert "embed" in pick_channel.sent[0]
     assert "view" in pick_channel.sent[0]
+
+
+@pytest.mark.asyncio
+async def test_change_name_modal_requires_staff_access():
+    interaction = DummyInteraction()
+    interaction.guild = types.SimpleNamespace(id=1)
+    interaction.user = types.SimpleNamespace(
+        id=42,
+        mention="<@42>",
+        guild_permissions=types.SimpleNamespace(manage_guild=False, manage_roles=False),
+    )
+
+    modal = bot.ChangeNameModal()
+    await modal.on_submit(interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    args, kwargs = interaction.response.send_message.await_args
+    assert kwargs.get("ephemeral") is True
+    assert "staff" in args[0].lower() or "admin" in args[0].lower()

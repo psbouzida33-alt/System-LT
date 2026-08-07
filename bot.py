@@ -997,16 +997,21 @@ async def post_staff_panels_cmd(ctx: commands.Context, member: discord.Member | 
     await ctx.send("Posted staff panels.", delete_after=8)
 
 
-def _interaction_is_authorized(interaction: discord.Interaction) -> bool:
-    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+def _member_is_authorized(member: discord.Member | discord.User | None) -> bool:
+    if not isinstance(member, discord.Member):
         return False
-    author = interaction.user
     return (
-        author.guild_permissions.manage_guild
-        or author.guild_permissions.manage_roles
-        or author.id in ADMIN_USER_IDS
-        or author.id in STAFF_USER_IDS
+        member.guild_permissions.manage_guild
+        or member.guild_permissions.manage_roles
+        or member.id in ADMIN_USER_IDS
+        or member.id in STAFF_USER_IDS
     )
+
+
+def _interaction_is_authorized(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None:
+        return False
+    return _member_is_authorized(interaction.user)
 
 async def _reply_ephemeral(interaction: discord.Interaction, message: str) -> None:
     try:
@@ -1114,6 +1119,13 @@ class ChangeNameModal(discord.ui.Modal, title="Change Your Nickname"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("This must be used inside a server.", ephemeral=True)
+            return
+
+        if not _interaction_is_authorized(interaction):
+            await interaction.response.send_message(
+                "You must be staff or an admin to change nicknames.",
+                ephemeral=True,
+            )
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -1755,6 +1767,11 @@ async def change_name_cmd(ctx: commands.Context[StatsBot], *, new_nick: str):
     if not isinstance(author, discord.Member):
         await ctx.send("This command must be used in a server.", delete_after=10)
         return
+
+    if not _can_manage_bot(ctx):
+        await ctx.send("You must be staff or an admin to change nicknames.", delete_after=10)
+        return
+
     new_nick = new_nick.strip()
     if not new_nick:
         await ctx.send("Please provide a new nickname.", delete_after=10)
