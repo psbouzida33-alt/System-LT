@@ -1121,13 +1121,6 @@ class ChangeNameModal(discord.ui.Modal, title="Change Your Nickname"):
             await interaction.response.send_message("This must be used inside a server.", ephemeral=True)
             return
 
-        if not _interaction_is_authorized(interaction):
-            await interaction.response.send_message(
-                "You must be staff or an admin to change nicknames.",
-                ephemeral=True,
-            )
-            return
-
         await interaction.response.defer(ephemeral=True)
         try:
             await _invoke_existing_command(
@@ -1766,10 +1759,6 @@ async def change_name_cmd(ctx: commands.Context[StatsBot], *, new_nick: str):
     author = ctx.author
     if not isinstance(author, discord.Member):
         await ctx.send("This command must be used in a server.", delete_after=10)
-        return
-
-    if not _can_manage_bot(ctx):
-        await ctx.send("You must be staff or an admin to change nicknames.", delete_after=10)
         return
 
     new_nick = new_nick.strip()

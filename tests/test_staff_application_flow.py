@@ -69,7 +69,8 @@ async def test_publish_staff_application_posts_to_staff_and_pick_channels(monkey
 
 
 @pytest.mark.asyncio
-async def test_change_name_modal_requires_staff_access():
+async def test_change_name_modal_allows_any_member(monkeypatch):
+    """Any member should be able to change their own nickname, not just staff/admins."""
     interaction = DummyInteraction()
     interaction.guild = types.SimpleNamespace(id=1)
     interaction.user = types.SimpleNamespace(
@@ -78,10 +79,16 @@ async def test_change_name_modal_requires_staff_access():
         guild_permissions=types.SimpleNamespace(manage_guild=False, manage_roles=False),
     )
 
+    invoked = AsyncMock(return_value=None)
+    monkeypatch.setattr(bot, "_invoke_existing_command", invoked)
+
     modal = bot.ChangeNameModal()
+    modal.new_nick._value = "NewNick"
     await modal.on_submit(interaction)
 
-    interaction.response.send_message.assert_awaited_once()
-    args, kwargs = interaction.response.send_message.await_args
-    assert kwargs.get("ephemeral") is True
-    assert "staff" in args[0].lower() or "admin" in args[0].lower()
+    interaction.response.send_message.assert_not_awaited()
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    invoked.assert_awaited_once()
+    interaction.followup.send.assert_awaited_once()
+    args, _kwargs = interaction.followup.send.await_args
+    assert "staff" not in args[0].lower() and "admin" not in args[0].lower()
