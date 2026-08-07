@@ -1046,7 +1046,7 @@ def _build_control_panel_embed() -> discord.Embed:
             "🔹 Some buttons open a short form when extra details are required\n"
             "🔹 You'll get a private confirmation after each action"
         ),
-        color=discord.Color.from_rgb(88, 101, 242),
+        color=discord.Color.red(),
     )
     embed.add_field(
         name="📋 Management",
@@ -1931,7 +1931,7 @@ async def setup_nick_cmd(ctx: commands.Context[StatsBot], admin_channel: discord
             "• Follow all community rules\n\n"
             "Requests that break the rules will be rejected."
         ),
-        color=discord.Color.blurple(),
+        color=discord.Color.red(),
     )
     message = await panel_channel.send(embed=embed, view=view)
     bot.add_view(view, message_id=message.id)
