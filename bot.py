@@ -14,6 +14,7 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 from discord.ext.commands.view import StringView
 from dotenv import load_dotenv
@@ -65,6 +66,11 @@ class StatsBot(commands.Bot):
             )
         )
         self.add_view(CommentPanelView())
+        try:
+            synced = await self.tree.sync()
+            print(f"Synced {len(synced)} slash command(s).")
+        except Exception as exc:
+            print(f"Slash command sync failed: {exc}")
 
 
 bot = StatsBot(
@@ -1052,19 +1058,19 @@ def _panel_user_can_run(
 
 def _build_control_panel_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Server Control Panel",
+        title="🛠️ Panel System — Staff Commands",
         description=(
-            "Run bot commands with one click — no need to type commands manually.\n\n"
+            "> Run bot commands with one click — no need to type anything manually.\n\n"
             "**How it works**\n"
-            "• Browse the sections below to find what you need\n"
-            "• Click a button to run the action instantly\n"
-            "• Some buttons open a short form when extra details are required\n"
-            "• You will receive a private confirmation after each action"
+            "🔹 Browse the sections below to find what you need\n"
+            "🔹 Click a button to run the action instantly\n"
+            "🔹 Some buttons open a short form when extra details are required\n"
+            "🔹 You'll get a private confirmation after each action"
         ),
         color=discord.Color.from_rgb(88, 101, 242),
     )
     embed.add_field(
-        name="Management",
+        name="📋 Management",
         value=(
             "**Post Panel** — Repost this control panel here\n"
             "**Setup Stats** — Create locked stats voice channels\n"
@@ -1074,27 +1080,26 @@ def _build_control_panel_embed() -> discord.Embed:
         inline=True,
     )
     embed.add_field(
-        name="Moderation",
+        name="🛡️ Moderation",
         value=(
             "**Verify Reminder** — DM members with the not-verify role\n"
-            "**Custom DM** — Send your own reminder message\n"
-            "**Staff Panels** — Publish staff application review panels"
+            "**Custom DM** — Send your own reminder message"
         ),
         inline=True,
     )
+    embed.add_field(name="\u200b", value="\u200b", inline=False)
     embed.add_field(
-        name="Utility",
+        name="🔧 Utility",
         value=(
             "**Restart Lounge** — Reconnect the bot to the voice lounge\n"
             "**Nick Review** — Show the configured nickname review channel\n"
             "**Ping** — Check bot latency\n"
-            "**My Nickname** — Change your server display name\n"
             "**Nick Panel** — Post the public nickname request button\n"
             "**Set Review Channel** — Choose where nick requests are reviewed"
         ),
         inline=False,
     )
-    embed.set_footer(text="Staff & admin controls only • Buttons marked with a form open a popup")
+    embed.set_footer(text="Staff & admin controls only  •  Buttons marked with a form open a popup")
     return embed
 
 
@@ -1492,17 +1497,6 @@ class CommentPanelView(discord.ui.View):
         del button
         await self._open_modal(interaction, SendNotVerifyModal(), require_auth=True)
 
-    @discord.ui.button(
-        label="Staff Panels",
-        style=discord.ButtonStyle.secondary,
-        custom_id="control_panel:mod:staff_panels",
-        emoji="📝",
-        row=1,
-    )
-    async def staff_panels_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        await self._open_modal(interaction, PostStaffPanelsModal(), require_manage_guild=True)
-
     # --- Utility ---
     @discord.ui.button(
         label="Restart Lounge",
@@ -1549,20 +1543,6 @@ class CommentPanelView(discord.ui.View):
         await self._run_command(interaction, ping_cmd)
 
     @discord.ui.button(
-        label="My Nickname",
-        style=discord.ButtonStyle.success,
-        custom_id="control_panel:util:my_nickname",
-        emoji="✏️",
-        row=3,
-    )
-    async def my_nickname_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if interaction.guild is None:
-            await self._reply(interaction, "This action must be used inside a server.")
-            return
-        await interaction.response.send_modal(ChangeNameModal())
-
-    @discord.ui.button(
         label="Nick Panel",
         style=discord.ButtonStyle.secondary,
         custom_id="control_panel:util:nick_panel",
@@ -1591,24 +1571,44 @@ class CommentPanelView(discord.ui.View):
         await self._open_modal(interaction, SetNickReviewModal(), require_auth=True)
 
 
-@bot.command(name="setupcommandspanel", aliases=["setupcommentpanel", "panel"])
-@commands.guild_only()
-@commands.check(_can_manage_bot)
-async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]):
-    """Post the staff control panel in the current channel."""
+async def _post_control_panel(channel: discord.abc.Messageable) -> discord.Message:
+    """Build and send the Panel System (staff control panel) embed + view."""
     embed = _build_control_panel_embed()
     if bot.user is not None:
         embed.set_author(
             name="Legends Tunisia Bot",
             icon_url=bot.user.display_avatar.url,
         )
-
     view = CommentPanelView()
+    message = await channel.send(embed=embed, view=view)
+    bot.add_view(view, message_id=message.id)
+    return message
+
+
+async def setup_command_spanel_cmd(ctx: commands.Context[StatsBot]) -> None:
+    """Legacy bridge so old panel buttons can still repost the panel via a Context."""
+    await _post_control_panel(ctx.channel)
+
+
+@bot.tree.command(
+    name="panel-system",
+    description="Post the staff control panel (staff commands) in this channel.",
+)
+@app_commands.guild_only()
+async def panel_system_command(interaction: discord.Interaction) -> None:
+    """Slash-command entry point for the Panel System — staff/admin only."""
+    if not _interaction_is_authorized(interaction):
+        await _reply_ephemeral(interaction, "You need to be staff or an admin to use this command.")
+        return
+    if not isinstance(interaction.channel, discord.TextChannel):
+        await _reply_ephemeral(interaction, "This command must be used in a text channel.")
+        return
+
     try:
-        message = await ctx.send(embed=embed, view=view)
-        bot.add_view(view, message_id=message.id)
+        await _post_control_panel(interaction.channel)
+        await _reply_ephemeral(interaction, "✅ **Panel System** posted in this channel.")
     except Exception as exc:
-        await ctx.send(f"Failed to post control panel: {exc}")
+        await _reply_ephemeral(interaction, f"Failed to post control panel: {exc}")
 
 
 async def _handle_legacy_panel_interaction(
