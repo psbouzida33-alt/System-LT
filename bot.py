@@ -87,6 +87,12 @@ _nick_config: dict[str, int | None] = load_nick_config()
 ADMIN_USER_IDS = {1511828976732209252}
 STAFF_USER_IDS = {1517586424306598140}
 
+# Fun auto-response: whenever this user is @mentioned, the bot posts a
+# "LT -> LOST" tag reaction like the Server Manager Bot example the owner
+# showed us, with a Renoir GIF.
+RENOIR_TAG_USER_ID = 1260282436902850693
+RENOIR_TAG_GIF_URL = "https://klipy.com/gifs/renoir-renoir-clair-obscur"
+
 
 def _can_manage_bot(ctx: commands.Context[StatsBot]) -> bool:
     if ctx.guild is None:
@@ -321,6 +327,15 @@ async def _send_not_verify_dm(member: discord.Member) -> None:
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
         return
+
+    if any(user.id == RENOIR_TAG_USER_ID for user in message.mentions):
+        try:
+            await message.channel.send(
+                f"LT ⟶ **LOST** 💀 LT <@{RENOIR_TAG_USER_ID}>\n{RENOIR_TAG_GIF_URL}"
+            )
+        except Exception as exc:
+            print(f"[renoir tag] failed to send reaction: {exc}")
+
     await bot.process_commands(message)
 
 
