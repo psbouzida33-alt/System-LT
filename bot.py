@@ -91,7 +91,9 @@ STAFF_USER_IDS = {1517586424306598140}
 # "LT -> LOST" tag reaction like the Server Manager Bot example the owner
 # showed us, with a Renoir GIF.
 RENOIR_TAG_USER_ID = 1260282436902850693
-RENOIR_TAG_GIF_URL = "https://klipy.com/gifs/renoir-renoir-clair-obscur"
+RENOIR_TAG_GIF_URL = (
+    "https://static2.klipy.com/ii/4493325008d34b7bf8cd6813cd5c1619/61/50/Duo47j8JMNnbl.gif"
+)
 
 
 def _can_manage_bot(ctx: commands.Context[StatsBot]) -> bool:
@@ -330,9 +332,9 @@ async def on_message(message: discord.Message) -> None:
 
     if any(user.id == RENOIR_TAG_USER_ID for user in message.mentions):
         try:
-            await message.channel.send(
-                f"LT ⟶ **LOST** 💀 LT <@{RENOIR_TAG_USER_ID}>\n{RENOIR_TAG_GIF_URL}"
-            )
+            embed = discord.Embed()
+            embed.set_image(url=RENOIR_TAG_GIF_URL)
+            await message.channel.send(embed=embed)
         except Exception as exc:
             print(f"[renoir tag] failed to send reaction: {exc}")
 
