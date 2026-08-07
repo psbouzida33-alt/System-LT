@@ -1051,10 +1051,8 @@ def _build_control_panel_embed() -> discord.Embed:
     embed.add_field(
         name="📋 Management",
         value=(
-            "**Post Panel** — Repost this control panel here\n"
             "**Setup Stats** — Create locked stats voice channels\n"
-            "**Staff App** — Publish the staff application panel\n"
-            "**Refresh Stats** — Force-update member count and clocks"
+            "**Staff App** — Publish the staff application panel"
         ),
         inline=True,
     )
@@ -1071,7 +1069,6 @@ def _build_control_panel_embed() -> discord.Embed:
         name="🔧 Utility",
         value=(
             "**Restart Lounge** — Reconnect the bot to the voice lounge\n"
-            "**Nick Review** — Show the configured nickname review channel\n"
             "**Ping** — Check bot latency\n"
             "**Nick Panel** — Post the public nickname request button\n"
             "**Set Review Channel** — Choose where nick requests are reviewed"
@@ -1380,26 +1377,8 @@ class CommentPanelView(discord.ui.View):
 
     # --- Management ---
     @discord.ui.button(
-        label="Post Panel",
-        style=discord.ButtonStyle.secondary,
-        custom_id="control_panel:mgmt:post_panel",
-        emoji="📋",
-        row=0,
-    )
-    async def post_panel_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        await self._run_command(
-            interaction,
-            setup_command_spanel_cmd,
-            require_auth=True,
-            require_guild=True,
-            require_text_channel=True,
-            success_message="Control panel posted in this channel.",
-        )
-
-    @discord.ui.button(
         label="Setup Stats",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.secondary,
         custom_id="control_panel:mgmt:setup_stats",
         emoji="📊",
         row=0,
@@ -1417,7 +1396,7 @@ class CommentPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Staff App",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.secondary,
         custom_id="control_panel:mgmt:staff_app",
         emoji="🧑‍💼",
         row=0,
@@ -1431,26 +1410,10 @@ class CommentPanelView(discord.ui.View):
             success_message="Staff application panel posted.",
         )
 
-    @discord.ui.button(
-        label="Refresh Stats",
-        style=discord.ButtonStyle.success,
-        custom_id="control_panel:mgmt:refresh_stats",
-        emoji="🔄",
-        row=0,
-    )
-    async def refresh_stats_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        await self._run_command(
-            interaction,
-            refresh_stats_cmd,
-            require_auth=True,
-            success_message="Stats channel refreshed.",
-        )
-
     # --- Moderation ---
     @discord.ui.button(
         label="Verify Reminder",
-        style=discord.ButtonStyle.danger,
+        style=discord.ButtonStyle.secondary,
         custom_id="control_panel:mod:verify_reminder",
         emoji="📩",
         row=1,
@@ -1467,7 +1430,7 @@ class CommentPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Custom DM",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.secondary,
         custom_id="control_panel:mod:custom_dm",
         emoji="✉️",
         row=1,
@@ -1479,7 +1442,7 @@ class CommentPanelView(discord.ui.View):
     # --- Utility ---
     @discord.ui.button(
         label="Restart Lounge",
-        style=discord.ButtonStyle.danger,
+        style=discord.ButtonStyle.secondary,
         custom_id="control_panel:util:restart_lounge",
         emoji="🔁",
         row=2,
@@ -1492,22 +1455,6 @@ class CommentPanelView(discord.ui.View):
             require_auth=True,
             require_guild=True,
             success_message="Voice lounge restart requested.",
-        )
-
-    @discord.ui.button(
-        label="Nick Review",
-        style=discord.ButtonStyle.secondary,
-        custom_id="control_panel:util:nick_review",
-        emoji="🔎",
-        row=2,
-    )
-    async def nick_review_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        await self._run_command(
-            interaction,
-            get_nick_review_cmd,
-            require_auth=True,
-            require_guild=True,
         )
 
     @discord.ui.button(
