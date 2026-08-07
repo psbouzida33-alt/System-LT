@@ -92,7 +92,7 @@ STAFF_USER_IDS = {1517586424306598140}
 # showed us, with a Renoir GIF.
 RENOIR_TAG_USER_ID = 1260282436902850693
 RENOIR_TAG_GIF_URL = (
-    "https://static2.klipy.com/ii/4493325008d34b7bf8cd6813cd5c1619/61/50/Duo47j8JMNnbl.gif"
+    "https://static2.klipy.com/ii/4493325008d34b7bf8cd6813cd5c1619/61/50/e785ihZenPMqsdel.gif"
 )
 
 
