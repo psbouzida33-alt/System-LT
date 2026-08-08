@@ -5,6 +5,7 @@ Updates locked voice channels: member count + live clock.
 import asyncio
 import os
 import re
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -25,6 +26,8 @@ from config import (
     CLOCK_UPDATE_SECONDS,
     MEMBER_COUNT_EXCLUDE_BOTS,
     NICK_PANEL_CHANNEL_ID,
+    NSFW_BAN_AFTER_WARNINGS,
+    OWNER_REPORT_USER_ID,
     STAFF_APP_CHANNEL_ID,
     STAFF_PICK_CHANNEL_ID,
     STATS_CATEGORY_NAME,
@@ -37,6 +40,8 @@ from config import (
     save_stats_config,
     load_nick_config,
     save_nick_config,
+    load_nsfw_warnings,
+    save_nsfw_warnings,
 )
 
 load_dotenv()
@@ -94,6 +99,171 @@ RENOIR_TAG_USER_ID = 1260282436902850693
 RENOIR_TAG_GIF_URL = (
     "https://static2.klipy.com/ii/4493325008d34b7bf8cd6813cd5c1619/61/50/e785ihZenPMqsdel.gif"
 )
+
+# --- NSFW auto-moderation ---
+# Runs every posted image through a local nudity classifier (nudenet). A hit
+# deletes the message, DMs the poster a warning, and DMs OWNER_REPORT_USER_ID
+# a report (who, where, why). After NSFW_BAN_AFTER_WARNINGS hits the member
+# is auto-banned. Detection is local/offline — no external API or key needed.
+_nsfw_warnings: dict[str, int] = load_nsfw_warnings()
+_nude_detector: Any = None
+_nude_detector_lock = threading.Lock()
+
+NSFW_EXPLICIT_LABELS = {
+    "FEMALE_GENITALIA_EXPOSED",
+    "MALE_GENITALIA_EXPOSED",
+    "FEMALE_BREAST_EXPOSED",
+    "BUTTOCKS_EXPOSED",
+    "ANUS_EXPOSED",
+    "MALE_BREAST_EXPOSED",
+}
+NSFW_CONFIDENCE_THRESHOLD = 0.6
+NSFW_MAX_SCAN_BYTES = 8 * 1024 * 1024  # skip anything bigger than 8 MB
+
+
+def _get_nude_detector() -> Any:
+    """Lazily load the nudenet model on first use (keeps startup fast)."""
+    global _nude_detector
+    if _nude_detector is None:
+        with _nude_detector_lock:
+            if _nude_detector is None:
+                from nudenet import NudeDetector
+
+                _nude_detector = NudeDetector()
+    return _nude_detector
+
+
+async def _scan_attachment_for_nsfw(attachment: discord.Attachment) -> tuple[str, float] | None:
+    if not attachment.content_type or not attachment.content_type.startswith("image/"):
+        return None
+    if attachment.size and attachment.size > NSFW_MAX_SCAN_BYTES:
+        return None
+
+    try:
+        data = await attachment.read()
+    except Exception as exc:
+        print(f"[nsfw-scan] failed to read attachment {attachment.filename}: {exc}")
+        return None
+
+    suffix = Path(attachment.filename).suffix or ".jpg"
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+
+        def _run_detection() -> list[dict[str, Any]]:
+            detector = _get_nude_detector()
+            return detector.detect(tmp_path)
+
+        results = await asyncio.to_thread(_run_detection)
+    except Exception as exc:
+        print(f"[nsfw-scan] detection failed for {attachment.filename}: {exc}")
+        return None
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    for det in results:
+        label = det.get("class") or det.get("label")
+        try:
+            score = float(det.get("score", 0))
+        except (TypeError, ValueError):
+            score = 0.0
+        if label in NSFW_EXPLICIT_LABELS and score >= NSFW_CONFIDENCE_THRESHOLD:
+            return label, score
+    return None
+
+
+async def _report_nsfw_to_owner(
+    message: discord.Message,
+    author: discord.abc.User,
+    reason: str,
+    count: int,
+    banned: bool,
+) -> None:
+    try:
+        owner = bot.get_user(OWNER_REPORT_USER_ID) or await bot.fetch_user(OWNER_REPORT_USER_ID)
+    except Exception as exc:
+        print(f"[nsfw-action] could not fetch owner {OWNER_REPORT_USER_ID}: {exc}")
+        return
+
+    embed = discord.Embed(
+        title="🚫 Explicit image removed" + (" — member banned" if banned else ""),
+        color=discord.Color.red(),
+        timestamp=datetime.now(),
+    )
+    embed.add_field(name="Member", value=f"{author} ({author.mention}) — `{author.id}`", inline=False)
+    channel_value = getattr(message.channel, "mention", None) or str(message.channel)
+    embed.add_field(name="Channel", value=channel_value, inline=True)
+    embed.add_field(name="Warning count", value=f"{count}/{NSFW_BAN_AFTER_WARNINGS}", inline=True)
+    embed.add_field(name="Reason", value=reason, inline=False)
+
+    try:
+        await owner.send(embed=embed)
+    except Exception as exc:
+        print(f"[nsfw-action] failed to send report to owner: {exc}")
+
+
+async def _take_nsfw_action(message: discord.Message, label: str, score: float) -> None:
+    author = message.author
+    guild = message.guild
+    if guild is None:
+        return
+
+    try:
+        await message.delete()
+    except discord.NotFound:
+        pass
+    except Exception as exc:
+        print(f"[nsfw-action] failed to delete message from {author} ({author.id}): {exc}")
+
+    user_key = str(author.id)
+    count = _nsfw_warnings.get(user_key, 0) + 1
+    _nsfw_warnings[user_key] = count
+    save_nsfw_warnings(_nsfw_warnings)
+
+    label_text = label.replace("_", " ").title()
+    reason = f"Explicit image detected ({label_text}, {score:.0%} confidence)"
+
+    try:
+        await author.send(
+            f"Your message in **{guild.name}** was removed because it contained explicit "
+            f"content ({label_text}). This is warning {count}/{NSFW_BAN_AFTER_WARNINGS} — "
+            "reaching the limit results in a ban."
+        )
+    except discord.Forbidden:
+        print(f"[nsfw-action] could not DM {author} ({author.id}), DMs closed")
+    except Exception as exc:
+        print(f"[nsfw-action] DM warning failed for {author} ({author.id}): {exc}")
+
+    banned = False
+    if count >= NSFW_BAN_AFTER_WARNINGS and isinstance(author, discord.Member):
+        try:
+            await guild.ban(author, reason=f"Auto-ban: {count} NSFW warnings ({label_text})")
+            banned = True
+        except Exception as exc:
+            print(f"[nsfw-action] failed to ban {author} ({author.id}): {exc}")
+
+    await _report_nsfw_to_owner(message, author, reason, count, banned)
+
+
+async def _handle_nsfw_attachments(message: discord.Message) -> bool:
+    """Returns True if the message was removed for explicit content."""
+    if not message.attachments or message.guild is None:
+        return False
+
+    for attachment in message.attachments:
+        hit = await _scan_attachment_for_nsfw(attachment)
+        if hit is None:
+            continue
+        label, score = hit
+        await _take_nsfw_action(message, label, score)
+        return True
+    return False
 
 
 def _can_manage_bot(ctx: commands.Context[StatsBot]) -> bool:
@@ -328,6 +498,9 @@ async def _send_not_verify_dm(member: discord.Member) -> None:
 @bot.event
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
+        return
+
+    if await _handle_nsfw_attachments(message):
         return
 
     if any(user.id == RENOIR_TAG_USER_ID for user in message.mentions):
