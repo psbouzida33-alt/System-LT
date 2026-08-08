@@ -99,6 +99,35 @@ def save_stats_config(config: dict[str, int | None]) -> None:
         json.dump(payload, f, indent=2)
 
 
+# --- NSFW auto-moderation ---
+# User who receives a DM report every time the bot removes an explicit image
+# (who posted it, where, and why), and after how many warnings a member is
+# auto-banned.
+OWNER_REPORT_USER_ID = _get_env_int("OWNER_REPORT_USER_ID", 1535578612542218391)
+NSFW_BAN_AFTER_WARNINGS = _get_env_int("NSFW_BAN_AFTER_WARNINGS", 3)
+
+NSFW_WARNINGS_FILE = DATA_DIR / "nsfw_warnings.json"
+
+
+def load_nsfw_warnings() -> dict[str, int]:
+    """Per-user explicit-image warning counts (persisted in data/nsfw_warnings.json)."""
+    if not NSFW_WARNINGS_FILE.is_file():
+        return {}
+    try:
+        with open(NSFW_WARNINGS_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+        return {str(user_id): int(count) for user_id, count in raw.items()}
+    except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+        print(f"Could not read {NSFW_WARNINGS_FILE}: {exc}")
+        return {}
+
+
+def save_nsfw_warnings(warnings: dict[str, int]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(NSFW_WARNINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(warnings, f, indent=2)
+
+
 # --- Nickname review channel persistence ---
 NICK_CONFIG_FILE = DATA_DIR / "nick_config.json"
 
