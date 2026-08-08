@@ -816,8 +816,8 @@ class StaffApplicationReviewView(discord.ui.View):
                 if member is not None:
                     if status == "Accepted":
                         await member.send(
-                            "Congratulations! You have been accepted to join our Staff team. "
-                            "Please head over to the Support channel so we can talk more about the details and get you set up."
+                            "Congratulations! You have been accepted, but you still need to complete an interview. "
+                            "Please join the Support voice channel now so we can speak with you."
                         )
                     else:
                         await member.send(
