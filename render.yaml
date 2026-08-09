@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: legends-tunisia-stats
+    runtime: docker
+    plan: free
+    branch: main
+    healthCheckPath: /
+    envVars:
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: LEVELS_BOT_TOKEN
+        sync: false
