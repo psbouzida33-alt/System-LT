@@ -37,6 +37,11 @@ from config import (
     save_stats_config,
     load_nick_config,
     save_nick_config,
+    MOD_WATCHED_CHANNELS,
+    MOD_LINK_REGEX,
+    MOD_BANNED_WORDS,
+    MOD_MONITORED_ROLE_IDS,
+    MOD_REPORT_ROLE_IDS,
 )
 
 load_dotenv()
@@ -325,6 +330,85 @@ async def _send_not_verify_dm(member: discord.Member) -> None:
         print(f"[not-verify] Unexpected DM error for {member} ({member.id}): {exc}")
 
 
+def _find_banned_word(content: str) -> str | None:
+    lower = content.lower()
+    for w in MOD_BANNED_WORDS:
+        if w.lower() in lower:
+            return w
+    return None
+
+
+async def _handle_staff_moderation(message: discord.Message) -> None:
+    """Delete link/badword messages from staff-role members + DM the team.
+
+    Only acts inside MOD_WATCHED_CHANNELS, and only on authors who hold one
+    of MOD_MONITORED_ROLE_IDS — regular members are never touched.
+    """
+    if message.channel.id not in MOD_WATCHED_CHANNELS:
+        return
+
+    member = message.author
+    if not isinstance(member, discord.Member):
+        return
+    role_ids = {r.id for r in member.roles}
+    if not (role_ids & MOD_MONITORED_ROLE_IDS):
+        return
+
+    content = message.content or ""
+    has_link = bool(MOD_LINK_REGEX.search(content))
+    banned_word = _find_banned_word(content)
+    if not has_link and not banned_word:
+        return
+
+    reason = "Link" if has_link else f'Kelma mamnou3a: "{banned_word}"'
+    username = str(message.author)
+    user_id = message.author.id
+    channel_name = message.channel.name
+    channel_id = message.channel.id
+
+    try:
+        await message.delete()
+    except discord.Forbidden:
+        print("[mod] Missing permission to delete message.")
+    except discord.HTTPException as exc:
+        print(f"[mod] Failed to delete message: {exc}")
+
+    embed = discord.Embed(
+        title="🚨 Message et7a5a",
+        color=discord.Color.red(),
+        timestamp=datetime.now(),
+    )
+    embed.add_field(name="User", value=f"{username} (`{user_id}`)", inline=False)
+    embed.add_field(
+        name="Channel", value=f"#{channel_name} (`{channel_id}`)", inline=False
+    )
+    embed.add_field(name="Sbeb", value=reason, inline=False)
+    embed.add_field(
+        name="Contenu",
+        value=(content[:1000] or "*(vide/attachment)*"),
+        inline=False,
+    )
+
+    guild = message.guild
+    if guild is not None:
+        recipients = [
+            m
+            for m in guild.members
+            if not m.bot
+            and m.id != message.author.id
+            and any(r.id in MOD_REPORT_ROLE_IDS for r in m.roles)
+        ]
+        for recipient in recipients:
+            try:
+                await recipient.send(embed=embed)
+            except discord.Forbidden:
+                print(f"[mod] Could not DM {recipient} (DMs closed).")
+            except discord.HTTPException as exc:
+                print(f"[mod] Failed to DM {recipient}: {exc}")
+
+    print(f"[mod] Deleted message from {username} in #{channel_name} — {reason}")
+
+
 @bot.event
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
@@ -337,6 +421,11 @@ async def on_message(message: discord.Message) -> None:
             await message.channel.send(embed=embed)
         except Exception as exc:
             print(f"[renoir tag] failed to send reaction: {exc}")
+
+    try:
+        await _handle_staff_moderation(message)
+    except Exception as exc:
+        print(f"[mod] on_message moderation error: {exc}")
 
     await bot.process_commands(message)
 
