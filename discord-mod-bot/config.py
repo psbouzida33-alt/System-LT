@@ -49,3 +49,12 @@ MONITORED_ROLE_IDS = {
     1517586424306598140,  # Staff Team
     1536024113892687892,  # Trial Staff
 }
+
+# El bot yeb3ath el DM report l KOL member 3andou wa7ed mel had el rôles
+# (mch chakhs wa7ed) — nafss el rôles el mora9bin, momken tbaddel ken t7eb.
+REPORT_ROLE_IDS = {
+    1511828976732209252,  # Head Admin
+    1534781116722974772,  # Moderator
+    1517586424306598140,  # Staff Team
+    1536024113892687892,  # Trial Staff
+}

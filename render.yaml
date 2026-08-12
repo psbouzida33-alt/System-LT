@@ -22,5 +22,3 @@ services:
     envVars:
       - key: DISCORD_TOKEN
         sync: false
-      - key: OWNER_ID
-        sync: false

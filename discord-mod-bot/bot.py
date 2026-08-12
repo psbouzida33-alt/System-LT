@@ -13,19 +13,22 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from config import WATCHED_CHANNELS, LINK_REGEX, BANNED_WORDS, MONITORED_ROLE_IDS
+from config import (
+    WATCHED_CHANNELS,
+    LINK_REGEX,
+    BANNED_WORDS,
+    MONITORED_ROLE_IDS,
+    REPORT_ROLE_IDS,
+)
 
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-OWNER_ID = os.getenv("OWNER_ID")
 
-if not TOKEN or not OWNER_ID:
+if not TOKEN:
     raise SystemExit(
-        "[ERROR] 5ali te3mer DISCORD_TOKEN w OWNER_ID fi fichier .env (chouf .env.example)."
+        "[ERROR] 5ali te3mer DISCORD_TOKEN fi fichier .env (chouf .env.example)."
     )
-
-OWNER_ID = int(OWNER_ID)
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger("mod-bot")
@@ -103,34 +106,46 @@ async def on_message(message: discord.Message):
         except discord.HTTPException as e:
             log.warning(f"Ma9dertch nefsa5 el message: {e}")
 
-        # Eb3ath report fi DM lel owner
-        owner = await bot.fetch_user(OWNER_ID)
-        if owner:
-            embed = discord.Embed(
-                title="🚨 Message et7a5a",
-                color=discord.Color.red(),
-                timestamp=datetime.now(timezone.utc),
-            )
-            embed.add_field(
-                name="User",
-                value=f"{info['username']} (`{info['user_id']}`)",
-                inline=False,
-            )
-            embed.add_field(
-                name="Channel",
-                value=f"#{info['channel']} (`{info['channel_id']}`)",
-                inline=False,
-            )
-            embed.add_field(name="Sbeb", value=info["reason"], inline=False)
-            embed.add_field(
-                name="Contenu",
-                value=(info["content"][:1000] or "*(vide/attachment)*"),
-                inline=False,
-            )
-            try:
-                await owner.send(embed=embed)
-            except discord.Forbidden:
-                log.warning("Ma9dertch neb3ath DM lel owner (DM mgha5).")
+        # Eb3ath report fi DM l KOL member 3andou wa7ed mel REPORT_ROLE_IDS
+        # (mch chakhs wa7ed) — na5rjou el author bech ma yeb3athlouch DM 3la rou7ou.
+        embed = discord.Embed(
+            title="🚨 Message et7a5a",
+            color=discord.Color.red(),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(
+            name="User",
+            value=f"{info['username']} (`{info['user_id']}`)",
+            inline=False,
+        )
+        embed.add_field(
+            name="Channel",
+            value=f"#{info['channel']} (`{info['channel_id']}`)",
+            inline=False,
+        )
+        embed.add_field(name="Sbeb", value=info["reason"], inline=False)
+        embed.add_field(
+            name="Contenu",
+            value=(info["content"][:1000] or "*(vide/attachment)*"),
+            inline=False,
+        )
+
+        guild = message.guild
+        if guild is not None:
+            recipients = [
+                m
+                for m in guild.members
+                if not m.bot
+                and m.id != message.author.id
+                and any(r.id in REPORT_ROLE_IDS for r in m.roles)
+            ]
+            for recipient in recipients:
+                try:
+                    await recipient.send(embed=embed)
+                except discord.Forbidden:
+                    log.warning(f"Ma9dertch neb3ath DM l {recipient} (DM mgha5).")
+                except discord.HTTPException as e:
+                    log.warning(f"Ma9dertch neb3ath DM l {recipient}: {e}")
 
         log.info(
             f"Et7a5a message mte3 {info['username']} fi #{info['channel']} — {reason}"
