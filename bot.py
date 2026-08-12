@@ -395,9 +395,9 @@ async def _handle_staff_moderation(message: discord.Message) -> None:
             m
             for m in guild.members
             if not m.bot
+            and m.id != message.author.id
             and any(r.id in MOD_REPORT_ROLE_IDS for r in m.roles)
         ]
-        print(f"[mod] {len(recipients)} report recipient(s) found: {[str(r) for r in recipients]}")
         for recipient in recipients:
             try:
                 await recipient.send(embed=embed)
@@ -405,10 +405,8 @@ async def _handle_staff_moderation(message: discord.Message) -> None:
                 print(f"[mod] Could not DM {recipient} (DMs closed).")
             except discord.HTTPException as exc:
                 print(f"[mod] Failed to DM {recipient}: {exc}")
-    else:
-        print("[mod] message.guild is None — could not resolve report recipients.")
 
-    print(f"[mod] Deleted message from {username} in #{channel_name} — {reason} (has_link={has_link})")
+    print(f"[mod] Deleted message from {username} in #{channel_name} — {reason}")
 
 
 @bot.event
