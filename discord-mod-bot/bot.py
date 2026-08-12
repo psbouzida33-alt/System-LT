@@ -5,13 +5,15 @@
 
 import os
 import logging
+import threading
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from config import WATCHED_CHANNELS, LINK_REGEX, BANNED_WORDS, EXEMPT_ROLE_IDS
+from config import WATCHED_CHANNELS, LINK_REGEX, BANNED_WORDS, MONITORED_ROLE_IDS
 
 load_dotenv()
 
@@ -47,6 +49,7 @@ def find_banned_word(content: str):
 async def on_ready():
     log.info(f"Connecté kif {bot.user}")
     log.info(f"Ye7ares 3la {len(WATCHED_CHANNELS)} channels.")
+    log.info(f"Ye7ass biss b {len(MONITORED_ROLE_IDS)} rôles (staff/admins).")
 
 
 @bot.event
@@ -61,13 +64,16 @@ async def on_message(message: discord.Message):
             await bot.process_commands(message)
             return
 
-        # Ken 3andou rôle exempt (admin/mod), khallih
+        # El bot ye7ass BISS b members eli 3andhom wa7ed mel MONITORED_ROLE_IDS.
+        # Member 3adi (mafamech rôle staff) → matdi rou7ek, matet7assbouch.
         member = message.author
-        if isinstance(member, discord.Member) and EXEMPT_ROLE_IDS:
-            role_ids = {r.id for r in member.roles}
-            if role_ids & EXEMPT_ROLE_IDS:
-                await bot.process_commands(message)
-                return
+        if not isinstance(member, discord.Member):
+            await bot.process_commands(message)
+            return
+        role_ids = {r.id for r in member.roles}
+        if not (role_ids & MONITORED_ROLE_IDS):
+            await bot.process_commands(message)
+            return
 
         content = message.content or ""
         has_link = bool(LINK_REGEX.search(content))
@@ -135,5 +141,32 @@ async def on_message(message: discord.Message):
         log.exception(f"Erreur fi on_message: {e}")
 
 
+class _HealthHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP server so Render (free web service) health checks pass."""
+
+    def _send_ok(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+
+    def do_GET(self):
+        self._send_ok()
+        self.wfile.write(b"discord-mod-bot is running")
+
+    def do_HEAD(self):
+        self._send_ok()
+
+    def log_message(self, format, *args):
+        pass
+
+
+def _start_health_server() -> None:
+    port = int(os.environ.get("PORT", "8080"))
+    HTTPServer(("0.0.0.0", port), _HealthHandler).serve_forever()
+
+
 if __name__ == "__main__":
+    if os.environ.get("PORT"):
+        threading.Thread(target=_start_health_server, daemon=True).start()
+
     bot.run(TOKEN)

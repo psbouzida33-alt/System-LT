@@ -41,8 +41,11 @@ BANNED_WORDS = [
     "كس اختك", "نيك امك",
 ]
 
-# Rôles eli ma yet7a5ouch el messages mte3hom (ex: admins/mods).
-# 7ott hna IDs mte3 el rôles eli te7eb tel3afihom (exempt).
-EXEMPT_ROLE_IDS = {
-    # ROLE_ID_HERE,
+# El bot ye7ass w yefsa5+yeb3ath DM BISS l members eli 3andhom wa7ed
+# mel had el rôles — members el 3adiyin (ma3andhomch rôle) matet7assbouch.
+MONITORED_ROLE_IDS = {
+    1511828976732209252,  # Head Admin
+    1534781116722974772,  # Moderator
+    1517586424306598140,  # Staff Team
+    1536024113892687892,  # Trial Staff
 }

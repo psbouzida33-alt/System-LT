@@ -52,3 +52,13 @@ python bot.py
 
 - El bot lezmou **role fo9 el members el 3adiyin** fi hierarchy mte3 el server bech y9dar yefsa5 messages.
 - Bech el bot y9dar yeb3athlek DM, lezem tkoun **member fi nafss el server** eli fih el bot (DM privacy settings).
+- Had el bot ye7ass **biss** b members eli 3andhom wa7ed mel rôles fi `MONITORED_ROLE_IDS` (config.py) — members el 3adiyin ma yet7assbouch.
+
+## Deploy 3al Render (24/7, minghir PC 7ay)
+
+1. Push el code l GitHub (déja mawjoud fi repo `System-LT`).
+2. Fi [Render Dashboard](https://dashboard.render.com) → **New → Blueprint** → 5tar el repo `System-LT` → Render ye9ra `render.yaml` mel root w yel9a service `discord-mod-bot` automatique.
+3. Fi service `discord-mod-bot` → **Environment** → zid:
+   - `DISCORD_TOKEN` = token mte3 el bot **el jdid** (application mnfassla fi Developer Portal — **mch nafss token System LT**)
+   - `OWNER_ID` = ID mte3ek
+4. Deploy. El bot ykoun online 24/7 (free plan Render yospindown b3ad 15 min minghir traffic HTTP — ken t7eb yeb9a always-on, zid uptime pinger kif [UptimeRobot](https://uptimerobot.com) 3al URL mte3 el service, wala upgrade el plan).
