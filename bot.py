@@ -48,6 +48,8 @@ from config import (
     KAWKAB_CHANNEL_ID,
     KAWKAB_MALE_ROLE_ID,
     KAWKAB_FEMALE_ROLE_ID,
+    KAWKAB_CARD_MALE_URL,
+    KAWKAB_CARD_FEMALE_URL,
 )
 
 load_dotenv()
@@ -1996,12 +1998,61 @@ class AdminApproveView(discord.ui.View):
 # ⚡ كوكب البرق — Kawkab Bra9 Bra9 citizenship system
 # ============================================================
 
+# Template cache for card images
+_kawkab_template_cache: dict[str, Image.Image] = {}
+
+
+async def _download_card_template(url: str, gender: str) -> Image.Image | None:
+    """Download and cache card template image."""
+    if gender in _kawkab_template_cache:
+        return _kawkab_template_cache[gender]
+
+    try:
+        async with asyncio.timeout(10):
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        return None
+                    template_data = await resp.read()
+
+        template = Image.open(io.BytesIO(template_data)).convert("RGBA")
+        _kawkab_template_cache[gender] = template
+        return template
+    except Exception as exc:
+        print(f"[kawkab] Failed to download template for {gender}: {exc}")
+        return None
+
+
 async def _generate_kawkab_card_image(member: discord.Member, gender: str = "unknown") -> io.BytesIO | None:
-    """Generate a citizenship card image with member's name and avatar.
+    """Generate citizenship card by overlaying avatar + name on template.
 
     Returns BytesIO object ready to send as Discord file, or None on error.
     """
     try:
+        # Determine which template to use
+        gender_lower = gender.lower()
+        if gender_lower == "male":
+            template_url = KAWKAB_CARD_MALE_URL
+            card_gender = "male"
+        elif gender_lower == "female":
+            template_url = KAWKAB_CARD_FEMALE_URL
+            card_gender = "female"
+        else:
+            template_url = KAWKAB_CARD_MALE_URL
+            card_gender = "male"
+
+        # Download template
+        template = await _download_card_template(template_url, card_gender)
+        if template is None:
+            return None
+
+        # Convert template to RGB for pasting
+        if template.mode == "RGBA":
+            card = template.convert("RGB")
+        else:
+            card = template.copy()
+
         # Download member avatar
         avatar_url = member.display_avatar.url
         async with asyncio.timeout(10):
@@ -2012,64 +2063,40 @@ async def _generate_kawkab_card_image(member: discord.Member, gender: str = "unk
                         return None
                     avatar_data = await resp.read()
 
-        # Open avatar as image
+        # Open and resize avatar
         avatar_img = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
 
-        # Create card background (dark blue, matching the aesthetic)
-        card_width, card_height = 900, 600
-        card = Image.new("RGB", (card_width, card_height), color=(26, 58, 140))  # dark blue
+        # Avatar position on card (left side, roughly where the placeholder is)
+        # Adjust these values based on your template dimensions
+        avatar_size = 220
+        avatar_img_resized = avatar_img.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
 
-        # Add a decorative border
-        border_draw = ImageDraw.Draw(card)
-        border_draw.rectangle(
-            [(10, 10), (card_width - 10, card_height - 10)],
-            outline=(100, 150, 255),
-            width=3,
-        )
+        # Create circular mask for avatar (optional, makes it look better)
+        mask = Image.new("L", (avatar_size, avatar_size), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse([(0, 0), (avatar_size, avatar_size)], fill=255)
 
-        # Resize and paste avatar to the left side
-        avatar_size = 250
-        avatar_img_resized = avatar_img.resize((avatar_size, avatar_size))
-        avatar_position = (50, 175)  # Centered vertically-ish
+        # Paste avatar with mask
+        avatar_position = (85, 205)  # Adjust based on template
         card.paste(avatar_img_resized, avatar_position, avatar_img_resized)
 
-        # Add text to the right
+        # Add member name text
         draw = ImageDraw.Draw(card)
 
-        # Try to use a nice font, fall back to default
+        # Try to use Arabic-compatible font, fall back to default
         try:
-            title_font = ImageFont.truetype("arial.ttf", 48)
-            text_font = ImageFont.truetype("arial.ttf", 36)
-            small_font = ImageFont.truetype("arial.ttf", 24)
+            name_font = ImageFont.truetype("arial.ttf", 32)
         except OSError:
-            title_font = ImageFont.load_default()
-            text_font = ImageFont.load_default()
-            small_font = ImageFont.load_default()
+            name_font = ImageFont.load_default()
 
-        # Draw title
-        title = "⚡ بطاقة المواطنة ⚡"
-        draw.text((380, 50), title, fill=(255, 255, 255), font=title_font, anchor="lm")
-
-        # Draw member name
-        draw.text((380, 180), f"اسم: {member.display_name}", fill=(220, 220, 220), font=text_font)
-
-        # Draw planet
-        draw.text((380, 260), "كوكب: البرق #998", fill=(220, 220, 220), font=text_font)
-
-        # Draw protection
-        draw.text((380, 340), "🛡️ حماية: دائمة ✓", fill=(150, 200, 255), font=text_font)
-
-        # Draw gender
-        gender_icon = "🧑" if gender.lower() == "male" else "👩" if gender.lower() == "female" else "⚡"
-        gender_text = "ذكر" if gender.lower() == "male" else "أنثى" if gender.lower() == "female" else "unknown"
-        draw.text((380, 420), f"{gender_icon} النوع: {gender_text}", fill=(220, 220, 220), font=text_font)
-
-        # Draw footer
+        # Member name position (bottom of card, center area)
+        member_name = member.display_name
+        # Position for name text (adjust based on template layout)
         draw.text(
-            (card_width // 2, card_height - 30),
-            "مواطنة كوكب البرق رقمية ⚡",
-            fill=(150, 200, 255),
-            font=small_font,
+            (350, 520),
+            member_name,
+            fill=(50, 50, 50),
+            font=name_font,
             anchor="mm",
         )
 

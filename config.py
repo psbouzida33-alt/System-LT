@@ -21,8 +21,12 @@ NICK_PANEL_CHANNEL_ID = 1532349544417984693
 # --- Kawkab Bra9 Bra9 (⚡ كوكب البرق) ---
 KAWKAB_ROLE_ID = 1541901291561820221      # rôle bra9 bra9
 KAWKAB_CHANNEL_ID = 1541903651948200146   # channel join kawkab + bta9et el mouwatana
-KAWKAB_MALE_ROLE_ID = 1517606739812417647    # male role
-KAWKAB_FEMALE_ROLE_ID = 1517606871064776804  # female role
+KAWKAB_MALE_ROLE_ID = 1517606739812417647    # male role (not used for roles)
+KAWKAB_FEMALE_ROLE_ID = 1517606871064776804  # female role (not used for roles)
+
+# Card template images (imgur URLs)
+KAWKAB_CARD_MALE_URL = "https://imgur.com/a/m6lPQh1"      # Blue card template
+KAWKAB_CARD_FEMALE_URL = "https://imgur.com/a/wGmBWxI"    # Pink card template
 
 def _get_env_int(name: str, default: int | None = None) -> int | None:
     value = os.getenv(name)
