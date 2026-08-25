@@ -2055,37 +2055,26 @@ class KawkabGenderView(discord.ui.View):
             )
             return
 
-        # Determine gender role
+        # Determine gender display (no role assignment)
         gender_lower = gender.lower()
         if gender_lower == "male":
-            gender_role_id = KAWKAB_MALE_ROLE_ID
             gender_display = "ذكر 🧑"
         elif gender_lower == "female":
-            gender_role_id = KAWKAB_FEMALE_ROLE_ID
             gender_display = "أنثى 👩"
         else:
             await interaction.response.send_message("اختيار غير صحيح.", ephemeral=True)
             return
 
-        # Get both roles
-        kawkab_role = guild.get_role(KAWKAB_ROLE_ID)
-        gender_role = guild.get_role(gender_role_id)
-
-        if not kawkab_role or not gender_role:
-            await interaction.response.send_message(
-                "⚠️ أحد الأدوار غير موجود — تواصل مع الإدارة.", ephemeral=True
-            )
-            return
-
+        # Only assign kawkab role
         try:
-            await self.member.add_roles(kawkab_role, gender_role, reason="انضم لكوكب البرق ⚡")
+            await self.member.add_roles(kawkab_role, reason="انضم لكوكب البرق ⚡")
         except discord.Forbidden:
             await interaction.response.send_message(
-                "⚠️ ما عندي صلاحية تعطي الأدوار — تواصل مع الإدارة.", ephemeral=True
+                "⚠️ ما عندي صلاحية تعطي الرول — تواصل مع الإدارة.", ephemeral=True
             )
             return
         except discord.HTTPException as exc:
-            await interaction.response.send_message(f"فشل إضافة الأدوار: {exc}", ephemeral=True)
+            await interaction.response.send_message(f"فشل إضافة الرول: {exc}", ephemeral=True)
             return
 
         # Acknowledge
@@ -2159,6 +2148,53 @@ class KawkabJoinView(discord.ui.View):
             view=gender_view,
             ephemeral=True,
         )
+
+    @discord.ui.button(
+        label="🚪 اغادر كوكب البرق",
+        style=discord.ButtonStyle.danger,
+        custom_id="kawkab:leave",
+        emoji="👋",
+    )
+    async def leave_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "هذا الزر يُستخدم داخل السيرفر فقط.", ephemeral=True
+            )
+            return
+
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            await interaction.response.send_message("تعذّر تحديد هويتك.", ephemeral=True)
+            return
+
+        # Get kawkab role
+        kawkab_role = interaction.guild.get_role(KAWKAB_ROLE_ID)
+        if kawkab_role is None:
+            await interaction.response.send_message(
+                "⚠️ رول كوكب البرق غير موجود.", ephemeral=True
+            )
+            return
+
+        if kawkab_role not in member.roles:
+            await interaction.response.send_message(
+                "⚠️ أنت لا تابع كوكب البرق!", ephemeral=True
+            )
+            return
+
+        try:
+            await member.remove_roles(kawkab_role, reason="غادر كوكب البرق")
+            await interaction.response.send_message(
+                f"👋 وداعاً {member.mention}! غادرت **كوكب البرق**",
+                ephemeral=True,
+            )
+            print(f"[kawkab] {member} ({member.id}) left kawkab bra9 bra9.")
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "⚠️ ما عندي صلاحية إزالة الرول — تواصل مع الإدارة.", ephemeral=True
+            )
+        except discord.HTTPException as exc:
+            await interaction.response.send_message(f"فشل إزالة الرول: {exc}", ephemeral=True)
 
 
 def _build_kawkab_panel_embed() -> discord.Embed:
