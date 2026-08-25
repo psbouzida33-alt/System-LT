@@ -3,6 +3,7 @@ Legends Tunisia — Server Stats Bot
 Updates locked voice channels: member count + live clock.
 """
 import asyncio
+import io
 import os
 import re
 import threading
@@ -18,6 +19,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from discord.ext.commands.view import StringView
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw, ImageFont
 
 from config import (
     BOT_VOICE_CHANNEL_ID,
@@ -1994,6 +1996,93 @@ class AdminApproveView(discord.ui.View):
 # ⚡ كوكب البرق — Kawkab Bra9 Bra9 citizenship system
 # ============================================================
 
+async def _generate_kawkab_card_image(member: discord.Member, gender: str = "unknown") -> io.BytesIO | None:
+    """Generate a citizenship card image with member's name and avatar.
+
+    Returns BytesIO object ready to send as Discord file, or None on error.
+    """
+    try:
+        # Download member avatar
+        avatar_url = member.display_avatar.url
+        async with asyncio.timeout(10):
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(avatar_url) as resp:
+                    if resp.status != 200:
+                        return None
+                    avatar_data = await resp.read()
+
+        # Open avatar as image
+        avatar_img = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
+
+        # Create card background (dark blue, matching the aesthetic)
+        card_width, card_height = 900, 600
+        card = Image.new("RGB", (card_width, card_height), color=(26, 58, 140))  # dark blue
+
+        # Add a decorative border
+        border_draw = ImageDraw.Draw(card)
+        border_draw.rectangle(
+            [(10, 10), (card_width - 10, card_height - 10)],
+            outline=(100, 150, 255),
+            width=3,
+        )
+
+        # Resize and paste avatar to the left side
+        avatar_size = 250
+        avatar_img_resized = avatar_img.resize((avatar_size, avatar_size))
+        avatar_position = (50, 175)  # Centered vertically-ish
+        card.paste(avatar_img_resized, avatar_position, avatar_img_resized)
+
+        # Add text to the right
+        draw = ImageDraw.Draw(card)
+
+        # Try to use a nice font, fall back to default
+        try:
+            title_font = ImageFont.truetype("arial.ttf", 48)
+            text_font = ImageFont.truetype("arial.ttf", 36)
+            small_font = ImageFont.truetype("arial.ttf", 24)
+        except OSError:
+            title_font = ImageFont.load_default()
+            text_font = ImageFont.load_default()
+            small_font = ImageFont.load_default()
+
+        # Draw title
+        title = "⚡ بطاقة المواطنة ⚡"
+        draw.text((380, 50), title, fill=(255, 255, 255), font=title_font, anchor="lm")
+
+        # Draw member name
+        draw.text((380, 180), f"اسم: {member.display_name}", fill=(220, 220, 220), font=text_font)
+
+        # Draw planet
+        draw.text((380, 260), "كوكب: البرق #998", fill=(220, 220, 220), font=text_font)
+
+        # Draw protection
+        draw.text((380, 340), "🛡️ حماية: دائمة ✓", fill=(150, 200, 255), font=text_font)
+
+        # Draw gender
+        gender_icon = "🧑" if gender.lower() == "male" else "👩" if gender.lower() == "female" else "⚡"
+        gender_text = "ذكر" if gender.lower() == "male" else "أنثى" if gender.lower() == "female" else "unknown"
+        draw.text((380, 420), f"{gender_icon} النوع: {gender_text}", fill=(220, 220, 220), font=text_font)
+
+        # Draw footer
+        draw.text(
+            (card_width // 2, card_height - 30),
+            "مواطنة كوكب البرق رقمية ⚡",
+            fill=(150, 200, 255),
+            font=small_font,
+            anchor="mm",
+        )
+
+        # Save to BytesIO
+        output = io.BytesIO()
+        card.save(output, format="PNG")
+        output.seek(0)
+        return output
+    except Exception as exc:
+        print(f"[kawkab] Failed to generate card image for {member}: {exc}")
+        return None
+
+
 def _build_kawkab_card(member: discord.Member, gender: str = "unknown") -> discord.Embed:
     """Build a بطاقة المواطنة citizenship card embed for the member."""
     gender_icon = "🧑" if gender.lower() == "male" else "👩" if gender.lower() == "female" else "🧑"
@@ -2083,7 +2172,7 @@ class KawkabGenderView(discord.ui.View):
             ephemeral=True,
         )
 
-        # Post citizenship card
+        # Post citizenship card (image + embed)
         channel = guild.get_channel(KAWKAB_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
             try:
@@ -2095,11 +2184,24 @@ class KawkabGenderView(discord.ui.View):
 
         if channel is not None:
             try:
-                card = _build_kawkab_card(self.member, gender=gender_display)
-                await channel.send(
-                    content=f"⚡ مواطن جديد في كوكب البرق! {self.member.mention}",
-                    embed=card,
-                )
+                # Generate card image
+                card_image = await _generate_kawkab_card_image(self.member, gender=gender_display)
+                card_embed = _build_kawkab_card(self.member, gender=gender_display)
+
+                if card_image:
+                    # Send with image
+                    file = discord.File(card_image, filename="citizenship_card.png")
+                    await channel.send(
+                        content=f"⚡ مواطن جديد في كوكب البرق! {self.member.mention}",
+                        file=file,
+                        embed=card_embed,
+                    )
+                else:
+                    # Fallback to embed only
+                    await channel.send(
+                        content=f"⚡ مواطن جديد في كوكب البرق! {self.member.mention}",
+                        embed=card_embed,
+                    )
             except Exception as exc:
                 print(f"[kawkab] Failed to post card for {self.member}: {exc}")
 
