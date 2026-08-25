@@ -2022,11 +2022,22 @@ async def _fetch_bytes(url: str) -> bytes | None:
     try:
         import aiohttp
 
+        # Imgur serves a placeholder (or 403s) to clients without a browser
+        # User-Agent, so direct i.imgur.com links need one to come back as PNG.
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; LegendsTunisiaBot/1.0)"}
+
         async with asyncio.timeout(15):
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(headers=headers) as session:
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         print(f"[kawkab] GET {url} -> HTTP {resp.status}")
+                        return None
+                    content_type = resp.headers.get("Content-Type", "")
+                    if not content_type.startswith("image/"):
+                        print(
+                            f"[kawkab] {url} returned {content_type or 'unknown type'}, not an image. "
+                            "Use a direct link that ends in .png/.jpg."
+                        )
                         return None
                     return await resp.read()
     except Exception as exc:
