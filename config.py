@@ -24,9 +24,38 @@ KAWKAB_CHANNEL_ID = 1541903651948200146   # channel join kawkab + bta9et el mouw
 KAWKAB_MALE_ROLE_ID = 1517606739812417647    # male role (not used for roles)
 KAWKAB_FEMALE_ROLE_ID = 1517606871064776804  # female role (not used for roles)
 
-# Card template images (imgur URLs)
-KAWKAB_CARD_MALE_URL = "https://imgur.com/a/m6lPQh1"      # Blue card template
-KAWKAB_CARD_FEMALE_URL = "https://imgur.com/a/wGmBWxI"    # Pink card template
+# --- Card templates (bta9et el mouwatana) ---
+# El bot ye9ra el template mel fichier local. 7ott ez-zouz tsawer houni:
+#   assets/kawkab_card_male.png    (bleu)
+#   assets/kawkab_card_female.png  (rose)
+# Ken t7eb URL 3ivadha, 7ott DIRECT link (i.imgur.com/xxxx.png) fi .env —
+# links kima imgur.com/a/xxxx houma page mch taswira, w mayekhdmouch.
+KAWKAB_ASSETS_DIR = Path("assets")
+KAWKAB_CARD_MALE_PATH = KAWKAB_ASSETS_DIR / "kawkab_card_male.png"
+KAWKAB_CARD_FEMALE_PATH = KAWKAB_ASSETS_DIR / "kawkab_card_female.png"
+KAWKAB_CARD_MALE_URL = os.getenv("KAWKAB_CARD_MALE_URL", "")
+KAWKAB_CARD_FEMALE_URL = os.getenv("KAWKAB_CARD_FEMALE_URL", "")
+
+# Font eli yekteb bih l-isem fou9 el card. Ken 3andek font mte3ek,
+# 7ottou fi assets/ w baddel l-isem houni.
+KAWKAB_FONT_PATH = KAWKAB_ASSETS_DIR / "kawkab_font.ttf"
+
+# Blayes el avatar w l-isem — ma3doudin b NISBA (0.0 - 1.0) mel 3ordh/toul
+# mte3 el template, bech yekhdmou m3a ay 7ajm taswira.
+#   avatar_box = (left, top, right, bottom)
+#   name_box   = (left, top, right, bottom)  -> l-isem yetcentra fi west-ha
+KAWKAB_CARD_LAYOUT = {
+    "male": {
+        "avatar_box": (0.022, 0.232, 0.283, 0.762),
+        "name_box": (0.015, 0.792, 0.290, 0.884),
+        "name_color": (255, 255, 255),
+    },
+    "female": {
+        "avatar_box": (0.038, 0.238, 0.298, 0.758),
+        "name_box": (0.030, 0.786, 0.300, 0.868),
+        "name_color": (90, 20, 55),
+    },
+}
 
 def _get_env_int(name: str, default: int | None = None) -> int | None:
     value = os.getenv(name)

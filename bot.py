@@ -50,6 +50,10 @@ from config import (
     KAWKAB_FEMALE_ROLE_ID,
     KAWKAB_CARD_MALE_URL,
     KAWKAB_CARD_FEMALE_URL,
+    KAWKAB_CARD_MALE_PATH,
+    KAWKAB_CARD_FEMALE_PATH,
+    KAWKAB_CARD_LAYOUT,
+    KAWKAB_FONT_PATH,
 )
 
 load_dotenv()
@@ -1998,115 +2002,195 @@ class AdminApproveView(discord.ui.View):
 # ⚡ كوكب البرق — Kawkab Bra9 Bra9 citizenship system
 # ============================================================
 
-# Template cache for card images
+# Loaded card templates, keyed by "male"/"female" so we only read them once.
 _kawkab_template_cache: dict[str, Image.Image] = {}
 
+# Fonts that ship with common Linux/Windows images, tried in order when no
+# custom font is dropped in assets/. The first one that opens wins.
+_KAWKAB_FONT_FALLBACKS = (
+    "DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "arial.ttf",
+)
 
-async def _download_card_template(url: str, gender: str) -> Image.Image | None:
-    """Download and cache card template image."""
-    if gender in _kawkab_template_cache:
-        return _kawkab_template_cache[gender]
 
+async def _fetch_bytes(url: str) -> bytes | None:
+    """Download a URL and return its bytes, or None if it fails."""
     try:
-        async with asyncio.timeout(10):
-            import aiohttp
+        import aiohttp
+
+        async with asyncio.timeout(15):
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as resp:
                     if resp.status != 200:
+                        print(f"[kawkab] GET {url} -> HTTP {resp.status}")
                         return None
-                    template_data = await resp.read()
-
-        template = Image.open(io.BytesIO(template_data)).convert("RGBA")
-        _kawkab_template_cache[gender] = template
-        return template
+                    return await resp.read()
     except Exception as exc:
-        print(f"[kawkab] Failed to download template for {gender}: {exc}")
+        print(f"[kawkab] Failed to download {url}: {exc}")
         return None
 
 
-async def _generate_kawkab_card_image(member: discord.Member, gender: str = "unknown") -> io.BytesIO | None:
-    """Generate citizenship card by overlaying avatar + name on template.
+async def _load_card_template(gender: str) -> Image.Image | None:
+    """Load the card template for a gender — local file first, then URL."""
+    cached = _kawkab_template_cache.get(gender)
+    if cached is not None:
+        return cached
 
-    Returns BytesIO object ready to send as Discord file, or None on error.
-    """
-    try:
-        # Determine which template to use
-        gender_lower = gender.lower()
-        if gender_lower == "male":
-            template_url = KAWKAB_CARD_MALE_URL
-            card_gender = "male"
-        elif gender_lower == "female":
-            template_url = KAWKAB_CARD_FEMALE_URL
-            card_gender = "female"
-        else:
-            template_url = KAWKAB_CARD_MALE_URL
-            card_gender = "male"
+    path = KAWKAB_CARD_FEMALE_PATH if gender == "female" else KAWKAB_CARD_MALE_PATH
+    url = KAWKAB_CARD_FEMALE_URL if gender == "female" else KAWKAB_CARD_MALE_URL
 
-        # Download template
-        template = await _download_card_template(template_url, card_gender)
-        if template is None:
-            return None
-
-        # Convert template to RGB for pasting
-        if template.mode == "RGBA":
-            card = template.convert("RGB")
-        else:
-            card = template.copy()
-
-        # Download member avatar
-        avatar_url = member.display_avatar.url
-        async with asyncio.timeout(10):
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.get(avatar_url) as resp:
-                    if resp.status != 200:
-                        return None
-                    avatar_data = await resp.read()
-
-        # Open and resize avatar
-        avatar_img = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
-
-        # Avatar position on card (left side, roughly where the placeholder is)
-        # Adjust these values based on your template dimensions
-        avatar_size = 220
-        avatar_img_resized = avatar_img.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
-
-        # Create circular mask for avatar (optional, makes it look better)
-        mask = Image.new("L", (avatar_size, avatar_size), 0)
-        mask_draw = ImageDraw.Draw(mask)
-        mask_draw.ellipse([(0, 0), (avatar_size, avatar_size)], fill=255)
-
-        # Paste avatar with mask
-        avatar_position = (85, 205)  # Adjust based on template
-        card.paste(avatar_img_resized, avatar_position, avatar_img_resized)
-
-        # Add member name text
-        draw = ImageDraw.Draw(card)
-
-        # Try to use Arabic-compatible font, fall back to default
+    template: Image.Image | None = None
+    if path.is_file():
         try:
-            name_font = ImageFont.truetype("arial.ttf", 32)
-        except OSError:
-            name_font = ImageFont.load_default()
-
-        # Member name position (bottom of card, center area)
-        member_name = member.display_name
-        # Position for name text (adjust based on template layout)
-        draw.text(
-            (350, 520),
-            member_name,
-            fill=(50, 50, 50),
-            font=name_font,
-            anchor="mm",
+            template = Image.open(path).convert("RGBA")
+        except Exception as exc:
+            print(f"[kawkab] Could not open template {path}: {exc}")
+    elif url:
+        data = await _fetch_bytes(url)
+        if data:
+            try:
+                template = Image.open(io.BytesIO(data)).convert("RGBA")
+            except Exception as exc:
+                print(f"[kawkab] Could not decode template from {url}: {exc}")
+    else:
+        print(
+            f"[kawkab] No template for '{gender}'. Add {path} to the repo "
+            "(or set a direct i.imgur.com URL in .env)."
         )
 
-        # Save to BytesIO
+    if template is not None:
+        _kawkab_template_cache[gender] = template
+    return template
+
+
+def _kawkab_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Load the name font at a given size, falling back to system fonts."""
+    candidates: list[str] = []
+    if KAWKAB_FONT_PATH.is_file():
+        candidates.append(str(KAWKAB_FONT_PATH))
+    candidates.extend(_KAWKAB_FONT_FALLBACKS)
+
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _shape_arabic(text: str) -> str:
+    """Reshape + reorder Arabic so PIL draws it joined and right-to-left.
+
+    Both helper libraries are optional; latin names render fine without them.
+    """
+    if not any("\u0600" <= ch <= "\u06ff" for ch in text):
+        return text
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+
+        return get_display(arabic_reshaper.reshape(text))
+    except ImportError:
+        return text
+    except Exception:
+        return text
+
+
+def _paste_avatar(card: Image.Image, avatar: Image.Image, box: tuple[float, float, float, float]) -> None:
+    """Fit the avatar into the template's photo frame, cropped to fill it."""
+    width, height = card.size
+    left = int(box[0] * width)
+    top = int(box[1] * height)
+    right = int(box[2] * width)
+    bottom = int(box[3] * height)
+    target_w = max(right - left, 1)
+    target_h = max(bottom - top, 1)
+
+    # Cover-fit: scale so the avatar fills the frame, then centre-crop it.
+    scale = max(target_w / avatar.width, target_h / avatar.height)
+    resized = avatar.resize(
+        (max(int(avatar.width * scale), target_w), max(int(avatar.height * scale), target_h)),
+        Image.Resampling.LANCZOS,
+    )
+    crop_left = (resized.width - target_w) // 2
+    crop_top = (resized.height - target_h) // 2
+    cropped = resized.crop((crop_left, crop_top, crop_left + target_w, crop_top + target_h))
+
+    # Rounded corners so the photo sits inside the frame instead of over it.
+    radius = max(int(min(target_w, target_h) * 0.08), 1)
+    mask = Image.new("L", (target_w, target_h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([(0, 0), (target_w - 1, target_h - 1)], radius=radius, fill=255)
+
+    card.paste(cropped, (left, top), mask)
+
+
+def _draw_name(
+    card: Image.Image,
+    name: str,
+    box: tuple[float, float, float, float],
+    color: tuple[int, int, int],
+) -> None:
+    """Draw the member name centred in the template's name plate."""
+    width, height = card.size
+    left = int(box[0] * width)
+    top = int(box[1] * height)
+    right = int(box[2] * width)
+    bottom = int(box[3] * height)
+    max_w = max(int((right - left) * 0.92), 1)
+    max_h = max(int((bottom - top) * 0.80), 1)
+
+    text = _shape_arabic(name.strip()) or "?"
+    draw = ImageDraw.Draw(card)
+
+    # Shrink the font until the name fits inside the plate.
+    size = max_h
+    font = _kawkab_font(size)
+    while size > 10:
+        font = _kawkab_font(size)
+        text_left, text_top, text_right, text_bottom = draw.textbbox((0, 0), text, font=font)
+        if (text_right - text_left) <= max_w and (text_bottom - text_top) <= max_h:
+            break
+        size -= 2
+
+    centre = ((left + right) // 2, (top + bottom) // 2)
+    # Thin outline keeps the name readable on both the blue and pink plates.
+    outline = (0, 0, 0) if sum(color) > 380 else (255, 255, 255)
+    draw.text(centre, text, font=font, fill=color, anchor="mm", stroke_width=2, stroke_fill=outline)
+
+
+async def _generate_kawkab_card_image(
+    member: discord.Member,
+    gender: str = "male",
+) -> io.BytesIO | None:
+    """Build the citizenship card: template + member avatar + member name."""
+    card_gender = "female" if gender.lower() == "female" else "male"
+
+    template = await _load_card_template(card_gender)
+    if template is None:
+        return None
+
+    avatar_bytes = await _fetch_bytes(member.display_avatar.replace(format="png", size=512).url)
+    if avatar_bytes is None:
+        return None
+
+    try:
+        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+        card = template.copy()
+        layout = KAWKAB_CARD_LAYOUT[card_gender]
+
+        _paste_avatar(card, avatar, layout["avatar_box"])
+        _draw_name(card, member.display_name, layout["name_box"], layout["name_color"])
+
         output = io.BytesIO()
-        card.save(output, format="PNG")
+        card.convert("RGB").save(output, format="PNG")
         output.seek(0)
         return output
     except Exception as exc:
-        print(f"[kawkab] Failed to generate card image for {member}: {exc}")
+        print(f"[kawkab] Failed to build card for {member}: {exc}")
         return None
 
 
@@ -2211,23 +2295,21 @@ class KawkabGenderView(discord.ui.View):
 
         if channel is not None:
             try:
-                # Generate card image
-                card_image = await _generate_kawkab_card_image(self.member, gender=gender_display)
-                card_embed = _build_kawkab_card(self.member, gender=gender_display)
+                # One finished image — the template with the member's photo and
+                # name burned in, exactly like the welcome cards.
+                card_image = await _generate_kawkab_card_image(self.member, gender=gender_lower)
+                announce = f"⚡ مواطن جديد في كوكب البرق! {self.member.mention}"
 
-                if card_image:
-                    # Send with image
-                    file = discord.File(card_image, filename="citizenship_card.png")
+                if card_image is not None:
                     await channel.send(
-                        content=f"⚡ مواطن جديد في كوكب البرق! {self.member.mention}",
-                        file=file,
-                        embed=card_embed,
+                        content=announce,
+                        file=discord.File(card_image, filename="kawkab_card.png"),
                     )
                 else:
-                    # Fallback to embed only
+                    # Template missing or download failed — fall back to the embed.
                     await channel.send(
-                        content=f"⚡ مواطن جديد في كوكب البرق! {self.member.mention}",
-                        embed=card_embed,
+                        content=announce,
+                        embed=_build_kawkab_card(self.member, gender=gender_display),
                     )
             except Exception as exc:
                 print(f"[kawkab] Failed to post card for {self.member}: {exc}")
@@ -2375,6 +2457,46 @@ async def setup_kawkab_cmd(ctx: commands.Context[StatsBot]):
     await ctx.send(
         f"✅ Panel كوكب البرق نشرناه في {channel.mention}!",
         delete_after=10,
+    )
+
+
+@bot.command(name="kawkabcard")
+@commands.guild_only()
+@commands.check(_can_manage_bot)
+async def kawkab_card_preview_cmd(
+    ctx: commands.Context[StatsBot],
+    gender: str = "male",
+    member: discord.Member | None = None,
+):
+    """Preview a citizenship card without joining — handy for tuning positions.
+
+    Usage: `?kawkabcard male`, `?kawkabcard female @member`.
+    """
+    target = member or (ctx.author if isinstance(ctx.author, discord.Member) else None)
+    if target is None:
+        await ctx.send("ما نجemtch n3arref el member.")
+        return
+
+    gender = gender.lower()
+    if gender not in ("male", "female"):
+        await ctx.send("El gender lazem ykoun `male` wale `female`.")
+        return
+
+    # Drop the cache so an updated template file is picked up without a restart.
+    _kawkab_template_cache.pop(gender, None)
+
+    card_image = await _generate_kawkab_card_image(target, gender=gender)
+    if card_image is None:
+        path = KAWKAB_CARD_FEMALE_PATH if gender == "female" else KAWKAB_CARD_MALE_PATH
+        await ctx.send(
+            f"⚠️ Ma najjamtech na3mel el card. Verifi eli `{path}` mawjouda fi repo "
+            "(taswira PNG/JPG 3adia, mch link imgur.com/a/...)."
+        )
+        return
+
+    await ctx.send(
+        f"Preview `{gender}` — {target.mention}",
+        file=discord.File(card_image, filename="kawkab_card_preview.png"),
     )
 
 
