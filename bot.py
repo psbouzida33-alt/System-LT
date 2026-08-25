@@ -42,6 +42,8 @@ from config import (
     MOD_BANNED_WORDS,
     MOD_MONITORED_ROLE_IDS,
     MOD_REPORT_ROLE_IDS,
+    KAWKAB_ROLE_ID,
+    KAWKAB_CHANNEL_ID,
 )
 
 load_dotenv()
@@ -71,6 +73,7 @@ class StatsBot(commands.Bot):
             )
         )
         self.add_view(CommentPanelView())
+        self.add_view(KawkabJoinView())
         try:
             synced = await self.tree.sync()
             print(f"Synced {len(synced)} slash command(s).")
@@ -1984,6 +1987,163 @@ class AdminApproveView(discord.ui.View):
 
 
 # `set_punishment` command removed per user request
+
+# ============================================================
+# ⚡ كوكب البرق — Kawkab Bra9 Bra9 citizenship system
+# ============================================================
+
+def _build_kawkab_card(member: discord.Member) -> discord.Embed:
+    """Build a بطاقة المواطنة citizenship card embed for the member."""
+    embed = discord.Embed(
+        title="⚡ بطاقة المواطنة ⚡",
+        color=0x1a3a8c,  # dark electric blue
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="🪪 اسم المواطن", value=f"**{member.display_name}**", inline=True)
+    embed.add_field(name="🪐 كوكب البرق", value="**#998**", inline=True)
+    embed.add_field(name="🛡️ حماية", value="**دائمة**", inline=True)
+    embed.add_field(
+        name="​",
+        value=(
+            "⚡ أنا مواطن من كوكب البرق\n"
+            "💙 تحت الحماية الدائمة"
+        ),
+        inline=False,
+    )
+    embed.set_image(url=member.display_avatar.with_size(256).url)
+    embed.set_footer(text=f"مواطنة كوكب البرق رقمية ⚡  •  {member.guild.name}")
+    return embed
+
+
+class KawkabJoinView(discord.ui.View):
+    """Persistent join-panel for ⚡ كوكب البرق."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="⚡ انضم لكوكب البرق",
+        style=discord.ButtonStyle.primary,
+        custom_id="kawkab:join",
+        emoji="🪐",
+    )
+    async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "هذا الزر يُستخدم داخل السيرفر فقط.", ephemeral=True
+            )
+            return
+
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            await interaction.response.send_message("تعذّر تحديد هويتك.", ephemeral=True)
+            return
+
+        # Give the kawkab role
+        role = interaction.guild.get_role(KAWKAB_ROLE_ID)
+        if role is None:
+            await interaction.response.send_message(
+                "⚠️ رول كوكب البرق غير موجود، تواصل مع الإدارة.", ephemeral=True
+            )
+            return
+
+        if role in member.roles:
+            await interaction.response.send_message(
+                "⚡ أنت أصلاً مواطن من كوكب البرق!", ephemeral=True
+            )
+            return
+
+        try:
+            await member.add_roles(role, reason="انضم لكوكب البرق ⚡")
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "⚠️ ما عندي صلاحية تعطي الرول — تواصل مع الإدارة.", ephemeral=True
+            )
+            return
+        except discord.HTTPException as exc:
+            await interaction.response.send_message(f"فشل إضافة الرول: {exc}", ephemeral=True)
+            return
+
+        # Acknowledge the interaction
+        await interaction.response.send_message(
+            f"⚡ مرحباً {member.mention}! أصبحت الآن مواطناً في **كوكب البرق** 🪐",
+            ephemeral=True,
+        )
+
+        # Post the citizenship card in the kawkab channel
+        channel = interaction.guild.get_channel(KAWKAB_CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel):
+            try:
+                fetched = await bot.fetch_channel(KAWKAB_CHANNEL_ID)
+                if isinstance(fetched, discord.TextChannel):
+                    channel = fetched
+            except Exception:
+                channel = None
+
+        if channel is not None:
+            try:
+                card = _build_kawkab_card(member)
+                await channel.send(
+                    content=f"⚡ مواطن جديد في كوكب البرق! {member.mention}",
+                    embed=card,
+                )
+            except Exception as exc:
+                print(f"[kawkab] Failed to post card for {member}: {exc}")
+
+        print(f"[kawkab] {member} ({member.id}) joined kawkab bra9 bra9.")
+
+
+def _build_kawkab_panel_embed() -> discord.Embed:
+    """Build the info embed for the kawkab join panel."""
+    embed = discord.Embed(
+        title="🪐 ⚡ كوكب البرق البرق ⚡ 🪐",
+        description=(
+            "> مرحباً بك في بوابة **كوكب البرق** ⚡\n"
+            "> اضغط على الزر للانضمام والحصول على بطاقة المواطنة الخاصة بك!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "**🛡️ شروط الانضمام — الـ Roles المطلوبة:**\n\n"
+            "🌹 **Rose**\n"
+            "💜 **Purple**\n"
+            "🦋 **Butterflies Welcome**\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "✅ عند الضغط على الزر:\n"
+            "• تحصل على رول **⚡ برق برق** تلقائياً\n"
+            "• يُنشر بطاقة مواطنتك في هذا القناة\n"
+            "• تصبح رسمياً مواطناً في **كوكب البرق #998** 🪐"
+        ),
+        color=0x1a3a8c,
+    )
+    embed.set_footer(text="مواطنة كوكب البرق رقمية  •  Legends Tunisia ⚡")
+    return embed
+
+
+@bot.command(name="setupkawkab")
+@commands.guild_only()
+@commands.check(_can_manage_bot)
+async def setup_kawkab_cmd(ctx: commands.Context[StatsBot]):
+    """Post the ⚡ كوكب البرق join panel in the configured kawkab channel."""
+    channel = ctx.guild.get_channel(KAWKAB_CHANNEL_ID) if ctx.guild else None
+    if not isinstance(channel, discord.TextChannel):
+        try:
+            fetched = await bot.fetch_channel(KAWKAB_CHANNEL_ID)
+            if isinstance(fetched, discord.TextChannel):
+                channel = fetched
+        except Exception:
+            channel = None
+
+    if channel is None:
+        await ctx.send("⚠️ Channel كوكب البرق ما لقيتوش. تأكد من الـ ID في config.py")
+        return
+
+    embed = _build_kawkab_panel_embed()
+    view = KawkabJoinView()
+    message = await channel.send(embed=embed, view=view)
+    bot.add_view(view, message_id=message.id)
+    await ctx.send(
+        f"✅ Panel كوكب البرق نشرناه في {channel.mention}!",
+        delete_after=10,
+    )
 
 
 @bot.command(name="setupnick")

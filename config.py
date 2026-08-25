@@ -18,6 +18,10 @@ STAFF_PICK_CHANNEL_ID = 1534586562447282258
 STAFF_APP_CHANNEL_ID = 1534583845884792874
 NICK_PANEL_CHANNEL_ID = 1532349544417984693
 
+# --- Kawkab Bra9 Bra9 (⚡ كوكب البرق) ---
+KAWKAB_ROLE_ID = 1541901291561820221      # rôle bra9 bra9
+KAWKAB_CHANNEL_ID = 1541903651948200146   # channel join kawkab + bta9et el mouwatana
+
 def _get_env_int(name: str, default: int | None = None) -> int | None:
     value = os.getenv(name)
     if value is None or not value.strip():
