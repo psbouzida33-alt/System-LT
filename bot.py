@@ -44,6 +44,8 @@ from config import (
     MOD_REPORT_ROLE_IDS,
     KAWKAB_ROLE_ID,
     KAWKAB_CHANNEL_ID,
+    KAWKAB_MALE_ROLE_ID,
+    KAWKAB_FEMALE_ROLE_ID,
 )
 
 load_dotenv()
@@ -1992,16 +1994,19 @@ class AdminApproveView(discord.ui.View):
 # ⚡ كوكب البرق — Kawkab Bra9 Bra9 citizenship system
 # ============================================================
 
-def _build_kawkab_card(member: discord.Member) -> discord.Embed:
+def _build_kawkab_card(member: discord.Member, gender: str = "unknown") -> discord.Embed:
     """Build a بطاقة المواطنة citizenship card embed for the member."""
+    gender_icon = "🧑" if gender.lower() == "male" else "👩" if gender.lower() == "female" else "🧑"
+
     embed = discord.Embed(
         title="⚡ بطاقة المواطنة ⚡",
         color=0x1a3a8c,  # dark electric blue
     )
     embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="🪪 اسم المواطن", value=f"**{member.display_name}**", inline=True)
-    embed.add_field(name="🪐 كوكب البرق", value="**#998**", inline=True)
-    embed.add_field(name="🛡️ حماية", value="**دائمة**", inline=True)
+    embed.add_field(name="🪪 اسم المواطن", value=f"**{member.display_name}**", inline=False)
+    embed.add_field(name="🪐 كوكب البرق", value="**كوكب البرق #998**", inline=False)
+    embed.add_field(name="🛡️ حماية", value="**دائمة ✓**", inline=False)
+    embed.add_field(name=f"{gender_icon} النوع", value=f"**{gender}**", inline=False)
     embed.add_field(
         name="​",
         value=(
@@ -2013,6 +2018,113 @@ def _build_kawkab_card(member: discord.Member) -> discord.Embed:
     embed.set_image(url=member.display_avatar.with_size(256).url)
     embed.set_footer(text=f"مواطنة كوكب البرق رقمية ⚡  •  {member.guild.name}")
     return embed
+
+
+class KawkabGenderModal(discord.ui.Modal, title="⚡ كوكب البرق — اختر نوعك"):
+    """Modal to select gender before joining kawkab."""
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        pass  # Just needed for the button view below
+
+
+class KawkabGenderView(discord.ui.View):
+    """Select gender for kawkab join."""
+
+    def __init__(self, member: discord.Member):
+        super().__init__(timeout=60)
+        self.member = member
+
+    async def _finish_join(self, interaction: discord.Interaction, gender: str) -> None:
+        """Complete the join process after gender selection."""
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Guild not found.", ephemeral=True)
+            return
+
+        # Check if already in kawkab
+        kawkab_role = guild.get_role(KAWKAB_ROLE_ID)
+        if kawkab_role is None:
+            await interaction.response.send_message(
+                "⚠️ رول كوكب البرق غير موجود، تواصل مع الإدارة.", ephemeral=True
+            )
+            return
+
+        if kawkab_role in self.member.roles:
+            await interaction.response.send_message(
+                "⚡ أنت أصلاً مواطن من كوكب البرق!", ephemeral=True
+            )
+            return
+
+        # Determine gender role
+        gender_lower = gender.lower()
+        if gender_lower == "male":
+            gender_role_id = KAWKAB_MALE_ROLE_ID
+            gender_display = "ذكر 🧑"
+        elif gender_lower == "female":
+            gender_role_id = KAWKAB_FEMALE_ROLE_ID
+            gender_display = "أنثى 👩"
+        else:
+            await interaction.response.send_message("اختيار غير صحيح.", ephemeral=True)
+            return
+
+        # Get both roles
+        kawkab_role = guild.get_role(KAWKAB_ROLE_ID)
+        gender_role = guild.get_role(gender_role_id)
+
+        if not kawkab_role or not gender_role:
+            await interaction.response.send_message(
+                "⚠️ أحد الأدوار غير موجود — تواصل مع الإدارة.", ephemeral=True
+            )
+            return
+
+        try:
+            await self.member.add_roles(kawkab_role, gender_role, reason="انضم لكوكب البرق ⚡")
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "⚠️ ما عندي صلاحية تعطي الأدوار — تواصل مع الإدارة.", ephemeral=True
+            )
+            return
+        except discord.HTTPException as exc:
+            await interaction.response.send_message(f"فشل إضافة الأدوار: {exc}", ephemeral=True)
+            return
+
+        # Acknowledge
+        await interaction.response.send_message(
+            f"⚡ مرحباً {self.member.mention}! أصبحت الآن مواطناً في **كوكب البرق** 🪐",
+            ephemeral=True,
+        )
+
+        # Post citizenship card
+        channel = guild.get_channel(KAWKAB_CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel):
+            try:
+                fetched = await bot.fetch_channel(KAWKAB_CHANNEL_ID)
+                if isinstance(fetched, discord.TextChannel):
+                    channel = fetched
+            except Exception:
+                channel = None
+
+        if channel is not None:
+            try:
+                card = _build_kawkab_card(self.member, gender=gender_display)
+                await channel.send(
+                    content=f"⚡ مواطن جديد في كوكب البرق! {self.member.mention}",
+                    embed=card,
+                )
+            except Exception as exc:
+                print(f"[kawkab] Failed to post card for {self.member}: {exc}")
+
+        print(f"[kawkab] {self.member} ({self.member.id}) joined kawkab as {gender_lower}.")
+
+    @discord.ui.button(label="ذكر 🧑", style=discord.ButtonStyle.primary, custom_id="kawkab:male")
+    async def male_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._finish_join(interaction, "male")
+
+    @discord.ui.button(label="أنثى 👩", style=discord.ButtonStyle.danger, custom_id="kawkab:female")
+    async def female_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._finish_join(interaction, "female")
 
 
 class KawkabJoinView(discord.ui.View):
@@ -2040,58 +2152,13 @@ class KawkabJoinView(discord.ui.View):
             await interaction.response.send_message("تعذّر تحديد هويتك.", ephemeral=True)
             return
 
-        # Give the kawkab role
-        role = interaction.guild.get_role(KAWKAB_ROLE_ID)
-        if role is None:
-            await interaction.response.send_message(
-                "⚠️ رول كوكب البرق غير موجود، تواصل مع الإدارة.", ephemeral=True
-            )
-            return
-
-        if role in member.roles:
-            await interaction.response.send_message(
-                "⚡ أنت أصلاً مواطن من كوكب البرق!", ephemeral=True
-            )
-            return
-
-        try:
-            await member.add_roles(role, reason="انضم لكوكب البرق ⚡")
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "⚠️ ما عندي صلاحية تعطي الرول — تواصل مع الإدارة.", ephemeral=True
-            )
-            return
-        except discord.HTTPException as exc:
-            await interaction.response.send_message(f"فشل إضافة الرول: {exc}", ephemeral=True)
-            return
-
-        # Acknowledge the interaction
+        # Ask for gender
+        gender_view = KawkabGenderView(member)
         await interaction.response.send_message(
-            f"⚡ مرحباً {member.mention}! أصبحت الآن مواطناً في **كوكب البرق** 🪐",
+            "⚡ اختر نوعك / Choisissez votre type:",
+            view=gender_view,
             ephemeral=True,
         )
-
-        # Post the citizenship card in the kawkab channel
-        channel = interaction.guild.get_channel(KAWKAB_CHANNEL_ID)
-        if not isinstance(channel, discord.TextChannel):
-            try:
-                fetched = await bot.fetch_channel(KAWKAB_CHANNEL_ID)
-                if isinstance(fetched, discord.TextChannel):
-                    channel = fetched
-            except Exception:
-                channel = None
-
-        if channel is not None:
-            try:
-                card = _build_kawkab_card(member)
-                await channel.send(
-                    content=f"⚡ مواطن جديد في كوكب البرق! {member.mention}",
-                    embed=card,
-                )
-            except Exception as exc:
-                print(f"[kawkab] Failed to post card for {member}: {exc}")
-
-        print(f"[kawkab] {member} ({member.id}) joined kawkab bra9 bra9.")
 
 
 def _build_kawkab_panel_embed() -> discord.Embed:
