@@ -54,6 +54,11 @@ from config import (
     KAWKAB_CARD_FEMALE_PATH,
     KAWKAB_CARD_LAYOUT,
     KAWKAB_FONT_PATH,
+    STORE_CHANNEL_ID,
+    STORE_SELLER_ROLE_ID,
+    STORE_BUY_EMOJI_NAME,
+    STORE_BUY_EMOJI_ID,
+    STORE_BUY_EMOJI_ANIMATED,
 )
 
 load_dotenv()
@@ -84,6 +89,7 @@ class StatsBot(commands.Bot):
         )
         self.add_view(CommentPanelView())
         self.add_view(KawkabJoinView())
+        self.add_dynamic_items(StoreBuyButton)
         try:
             synced = await self.tree.sync()
             print(f"Synced {len(synced)} slash command(s).")
@@ -422,6 +428,139 @@ async def _handle_staff_moderation(message: discord.Message) -> None:
     print(f"[mod] Deleted message from {username} in #{channel_name} — {reason}")
 
 
+class StoreBuyButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"store:buy:(?P<seller_id>[0-9]+)",
+):
+    """Persistent "Buy Now" button — the seller's id lives in the custom_id."""
+
+    def __init__(self, seller_id: int) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Buy Now",
+                style=discord.ButtonStyle.success,
+                custom_id=f"store:buy:{seller_id}",
+                emoji=discord.PartialEmoji(
+                    name=STORE_BUY_EMOJI_NAME,
+                    id=STORE_BUY_EMOJI_ID,
+                    animated=STORE_BUY_EMOJI_ANIMATED,
+                ),
+            )
+        )
+        self.seller_id = seller_id
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+        /,
+    ) -> "StoreBuyButton":
+        del interaction, item
+        return cls(int(match["seller_id"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        buyer = interaction.user
+        if buyer.id == self.seller_id:
+            await interaction.response.send_message(
+                "Hedhi el annonce mte3ek enti 😄", ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            f"🛒 Bech tchri? Ab3ath message l <@{self.seller_id}> bech tkamlou "
+            "el commande.",
+            ephemeral=True,
+        )
+
+        message = interaction.message
+        seller = interaction.guild.get_member(self.seller_id) if interaction.guild else None
+        if seller is None or message is None:
+            return
+        try:
+            await seller.send(
+                f"🛒 {buyer.mention} (`{buyer}`) y7eb yechri men el annonce mte3ek: "
+                f"{message.jump_url}"
+            )
+        except discord.HTTPException as exc:
+            print(f"[store] Could not DM seller {seller} ({seller.id}): {exc}")
+
+
+def _is_image_attachment(attachment: discord.Attachment) -> bool:
+    if attachment.content_type:
+        return attachment.content_type.startswith("image/")
+    return Path(attachment.filename).suffix.lower() in {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif",
+    }
+
+
+async def _handle_store_listing(message: discord.Message) -> bool:
+    """Repost a seller's message in the store channel with a Buy Now button.
+
+    Only acts in STORE_CHANNEL_ID and only on members holding
+    STORE_SELLER_ROLE_ID. The repost is sent first and the original is
+    deleted after, so a failed upload never loses the seller's listing.
+    Returns True when the message was turned into a listing.
+    """
+    if message.channel.id != STORE_CHANNEL_ID:
+        return False
+
+    member = message.author
+    if not isinstance(member, discord.Member):
+        return False
+    if not any(role.id == STORE_SELLER_ROLE_ID for role in member.roles):
+        return False
+
+    content = (message.content or "").strip()
+    if not content and not message.attachments:
+        return False
+
+    files: list[discord.File] = []
+    image_filename: str | None = None
+    for index, attachment in enumerate(message.attachments):
+        filename = attachment.filename
+        if image_filename is None and _is_image_attachment(attachment):
+            # attachment:// needs a URL-safe name, so rename the embedded image.
+            suffix = Path(attachment.filename).suffix.lower() or ".png"
+            filename = f"listing{suffix}"
+            image_filename = filename
+        try:
+            files.append(await attachment.to_file(filename=filename))
+        except discord.HTTPException as exc:
+            # Keep the original untouched rather than lose the seller's file.
+            print(f"[store] Could not download attachment #{index}: {exc}")
+            return False
+
+    embed = discord.Embed(
+        description=content[:4096] or None,
+        color=discord.Color.green(),
+        timestamp=message.created_at,
+    )
+    embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+    if image_filename is not None:
+        embed.set_image(url=f"attachment://{image_filename}")
+
+    view = discord.ui.View(timeout=None)
+    view.add_item(StoreBuyButton(member.id))
+
+    try:
+        await message.channel.send(embed=embed, files=files, view=view)
+    except discord.HTTPException as exc:
+        print(f"[store] Failed to post listing for {member} ({member.id}): {exc}")
+        return False
+
+    try:
+        await message.delete()
+    except discord.Forbidden:
+        print("[store] Missing Manage Messages permission to delete the original.")
+    except discord.HTTPException as exc:
+        print(f"[store] Failed to delete original message: {exc}")
+
+    print(f"[store] Listing posted for {member} ({member.id}).")
+    return True
+
+
 @bot.event
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
@@ -439,6 +578,12 @@ async def on_message(message: discord.Message) -> None:
         await _handle_staff_moderation(message)
     except Exception as exc:
         print(f"[mod] on_message moderation error: {exc}")
+
+    try:
+        if await _handle_store_listing(message):
+            return
+    except Exception as exc:
+        print(f"[store] on_message listing error: {exc}")
 
     await bot.process_commands(message)
 

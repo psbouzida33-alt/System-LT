@@ -78,6 +78,18 @@ NOT_VERIFY_DM_MESSAGE = os.getenv(
 
 STATS_CATEGORY_NAME = "─── ❖ ── ⚙️ SYSTEM ZONE ⚙️ ── ❖ ───"
 
+# --- Seller store channel ---
+# Ay message (ktiba / taswira) yektebha wa7ed 3andou STORE_SELLER_ROLE_ID fi
+# STORE_CHANNEL_ID, el bot yefsa5ha w yrepostiha houwa m3a zorr "Buy Now".
+STORE_CHANNEL_ID = 1562070317701013564
+STORE_SELLER_ROLE_ID = 1562158615463207062
+
+# Application emoji (Developer Portal -> Emojis) — lazem el bot ykoun mel
+# nafs el application eli feha el emoji, sinon ma yodhhorch.
+STORE_BUY_EMOJI_NAME = "74341buy"
+STORE_BUY_EMOJI_ID = 1562160992945700914
+STORE_BUY_EMOJI_ANIMATED = False
+
 # Rotating world clocks — (flag, country name, timezone)
 WORLD_CLOCKS = (
     ("🇹🇳", "Tunisia", "Africa/Tunis"),
